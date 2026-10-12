@@ -1,0 +1,13 @@
+[project]
+name = "dra-boundary-free-eval"
+version = "0.1.0"
+description = "Task-boundary-free evaluation for a simulated pushing task (Dean's Research Award project)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Pinned exactly: results that depend on the physics should not shift under us.
+    "mujoco==3.15.0",
+]
+
+[tool.uv]
+# There is no installable package of our own yet, only scripts.
+package = false

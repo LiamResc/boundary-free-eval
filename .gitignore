@@ -1,0 +1,11 @@
+# Private working notes: kept on this machine, not published
+CLAUDE.md
+dra_project_brief.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
