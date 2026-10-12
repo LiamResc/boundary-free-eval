@@ -18,7 +18,7 @@ SCENE = Path(__file__).resolve().parent.parent / "models" / "franka_fr3" / "scen
 # ---- Things to change and re-run ---------------------------------------------
 JOINT = "fr3_joint1"  # which joint to swing: fr3_joint1 (at the base) to fr3_joint7 (at the wrist)
 SWING = 0.5           # how far either side of the home angle, in radians (0.5 rad is about 29 degrees)
-PERIOD = 4.0          # seconds for one full back-and-forth
+PERIOD = 4        # seconds for one full back-and-forth
 # -------------------------------------------------------------------------------
 
 
@@ -35,23 +35,25 @@ def run(model, data, viewer=None, seconds=None):
     # In this model each motor has the same name as the joint it drives.
     motor = model.actuator(JOINT).id
     home_angle = data.ctrl[motor]
-    report_every = round(0.5 / model.opt.timestep)
-    steps = 0
+    next_report = 0.0
+    largest_gap = 0.0
     wall_start = time.time()
 
-    while (viewer is None or viewer.is_running()) and (seconds is None or data.time < seconds):
+    while (viewer is None or viewer.is_running()) and (seconds is None or data.time <= seconds + 1e-9):
         # 1. Decide the command: the angle we want this joint's motor to aim for right now.
         target = home_angle + SWING * math.sin(2 * math.pi * data.time / PERIOD)
         data.ctrl[motor] = target
 
-        # 2. Advance the physics by one timestep (2 milliseconds of simulated time).
-        mujoco.mj_step(model, data)
-        steps += 1
+        # 2. Compare what we are asking for with where the joint is at this same instant.
+        #    Print it eight times per swing, so the same eight moments show up whatever PERIOD is.
+        actual = data.joint(JOINT).qpos[0]
+        largest_gap = max(largest_gap, abs(target - actual))
+        if data.time >= next_report - 1e-9:
+            print(f"t={data.time:6.3f} s   commanded={target:+.3f}   actual={actual:+.3f}   gap={target - actual:+.4f} rad")
+            next_report += PERIOD / 8
 
-        # 3. Twice per simulated second, compare what we asked for with what happened.
-        if steps % report_every == 0:
-            actual = data.joint(JOINT).qpos[0]
-            print(f"t={data.time:6.2f} s   commanded={target:+.3f}   actual={actual:+.3f}   gap={target - actual:+.4f} rad")
+        # 3. Advance the physics by one timestep (2 milliseconds of simulated time).
+        mujoco.mj_step(model, data)
 
         # 4. With a window open: draw the new state, then wait for the real clock to catch up
         #    with simulated time, so the motion plays at real speed.
@@ -61,15 +63,17 @@ def run(model, data, viewer=None, seconds=None):
             if ahead > 0:
                 time.sleep(ahead)
 
+    print(f"largest gap: {largest_gap:.4f} rad ({math.degrees(largest_gap):.1f} degrees)")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Swing one FR3 joint back and forth.")
-    parser.add_argument("--headless", action="store_true", help="no window: simulate 8 seconds and print")
+    parser.add_argument("--headless", action="store_true", help="no window: simulate two swings and print")
     args = parser.parse_args()
 
     model, data = load()
     if args.headless:
-        run(model, data, seconds=8.0)
+        run(model, data, seconds=2 * PERIOD)
     else:
         with mujoco.viewer.launch_passive(model, data) as viewer:
             run(model, data, viewer=viewer)
