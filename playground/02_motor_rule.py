@@ -21,7 +21,7 @@ JOINT = "fr3_joint1"  # this script is about one motor: the one at the base of t
 
 # ---- Things to change and re-run ---------------------------------------------
 STIFFNESS = 4500.0  # the spring: newton-metres of push per radian of gap (4500 is the model's own value)
-DAMPING = 450.0   # the damper: newton-metres of resistance per radian-per-second of speed (model's own: 450)
+DAMPING = 450.0     # the damper: newton-metres of resistance per radian-per-second of speed (model's own: 450)
 SWING = 0.5         # how far either side of the home angle, in radians
 PERIOD = 4.0        # seconds for one full back-and-forth
 # -------------------------------------------------------------------------------
