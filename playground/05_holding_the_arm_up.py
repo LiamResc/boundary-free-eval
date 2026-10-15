@@ -10,7 +10,7 @@ SCENE = Path(__file__).resolve().parent.parent / "models" / "franka_fr3" / "scen
 HAND = "attachment_site"  # the point at the end of the arm's last link, where a tool gets mounted
 
 # ---- Things to change and re-run ---------------------------------------------
-COMPENSATE = 0.0  # share of the arm's weight cancelled by a computed push: 0.0 is none of it, 1.0 is all of it
+COMPENSATE = 0.8  # share of the arm's weight cancelled by a computed push: 0.0 is none of it, 1.0 is all of it
 # -------------------------------------------------------------------------------
 
 
