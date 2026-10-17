@@ -1,0 +1,43 @@
+<mujoco model="block world">
+  <option timestep="0.002"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <global azimuth="90" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="floor" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="floor" texture="floor" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <material name="table" rgba="0.55 0.45 0.35 1"/>
+    <material name="block" rgba="0.85 0.35 0.2 1"/>
+  </asset>
+
+  <!-- Nothing here touches anything else: the floor and table are only for looking at.
+       The block's friction is set on its joint, from block_world.py. -->
+  <default>
+    <geom contype="0" conaffinity="0"/>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" directional="true"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor"/>
+    <geom name="table" type="box" pos="0 0 0.375" size="1.1 0.3 0.375" material="table"/>
+
+    <!-- A 10 cm cube resting on the table top. -->
+    <body name="block" pos="0 0 0.8">
+      <!-- The track: the block can only slide along x, and only as far as the ends of the table.
+           The two "friction" settings make the joint's friction grip firmly when the block is meant to stick. -->
+      <joint name="track" type="slide" axis="1 0 0" range="-1 1" limited="true"
+        solreffriction="0.004 1" solimpfriction="0.99 0.999 0.001"/>
+      <geom name="block" type="box" size="0.05 0.05 0.05" mass="1" material="block"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- The ideal pusher: pushes (+) or pulls (-) along the track with exactly the commanded force, in newtons. -->
+    <motor name="pusher" joint="track" ctrlrange="-20 20" ctrllimited="true"/>
+  </actuator>
+</mujoco>
