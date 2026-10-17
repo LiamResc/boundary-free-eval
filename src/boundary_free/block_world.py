@@ -106,3 +106,13 @@ class BlockWorld:
     def applied_push(self):
         """The force the pusher actually applied on the last step, after capping, in newtons."""
         return float(self.data.actuator_force[0])
+
+    # ---- 4. For checking and drawing only (controllers must not use this) ----
+
+    @property
+    def friction_force(self):
+        """The force friction applied on the last step, in newtons; it always opposes the push or the motion.
+
+        At the very ends of the track it also includes the end stops.
+        """
+        return float(self.data.qfrc_constraint[self._dof])

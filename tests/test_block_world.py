@@ -59,6 +59,15 @@ def test_changing_the_friction_mid_run():
     assert (world.velocity - velocity) / 0.1 == pytest.approx(expected, rel=0.01)
 
 
+def test_friction_matches_the_push_while_stuck_and_is_the_limit_while_sliding():
+    world = BlockWorld(friction=0.3, mass=1.0)
+    run(world, 2.0, seconds=0.5)  # under the 2.94 N limit: stuck
+    assert world.friction_force == pytest.approx(-2.0, abs=1e-3)
+
+    run(world, 6.0, seconds=0.3)  # over the limit: sliding towards +x
+    assert world.friction_force == pytest.approx(-world.friction_limit, rel=1e-3)
+
+
 def test_push_is_capped_at_the_limit():
     world = BlockWorld(friction=0.3, mass=1.0)
     run(world, 1000.0, seconds=0.1)
