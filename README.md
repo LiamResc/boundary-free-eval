@@ -1,7 +1,9 @@
 # boundary-free-eval
+A robot cannot be made general purpose by training it once on a large collection of data and shipping it into the real world, because the real world is too big and too changeable for any fixed dataset to cover, so a robot has to keep improving from its own experience after deployment, and the field needs a new kind of test to tell whether it does.
+
+This idea is in contrast to traditional LLM training and deployment.
 
 # Simulated Arm - FR3
-
 ## Motors / Joints
 Each motor follows the rule:
 
