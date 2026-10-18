@@ -7,18 +7,11 @@ With a window (on macOS this needs the `mjpython` launcher):
 In the window, a red arrow shows the pusher's force and a blue arrow shows friction (4 cm per newton).
 """
 import argparse
-import time
 
-import mujoco
 import mujoco.viewer
-import numpy as np
 
 from boundary_free.block_world import GRAVITY, BlockWorld
-
-BLOCK_HALF = 0.05    # the block is a 10 cm cube
-BLOCK_HEIGHT = 0.8   # height of the block's centre above the floor, in metres
-TABLE_TOP = 0.75     # height of the table top, in metres
-ARROW_SCALE = 0.04   # metres of arrow per newton of force
+from boundary_free.viewer_tools import RealTime, draw_forces
 
 # ---- Things to change and re-run ---------------------------------------------
 FRICTION = 0.3   # friction coefficient between block and table
@@ -83,49 +76,12 @@ def keep_window_open(world, viewer):
 
 
 def show(world, viewer):
-    """With a window open: draw the new state, then wait so the motion plays at real speed."""
+    """With a window open: draw the forces and the new state, then wait so the motion plays at real speed."""
     if viewer is None:
         return
-    draw_forces(world, viewer)
+    draw_forces(viewer, world)
     viewer.sync()
-    ahead = world.time - (time.time() - show.wall_start)
-    if ahead > 0:
-        time.sleep(ahead)
-
-
-def draw_forces(world, viewer):
-    """Draw the two forces on the block as arrows in the window.
-
-    Neither force comes from anything visible: the pusher is an invisible motor on the block's track,
-    and friction is set on the track too. The arrows make them visible.
-    """
-    scene = viewer.user_scn
-    scene.ngeom = 0
-    x = world.position
-
-    # Red: the pusher's force, drawn as a push arriving at the back face of the block.
-    push = world.applied_push
-    if abs(push) > 0.01:
-        direction = np.sign(push)
-        tip = np.array([x - direction * BLOCK_HALF, 0.0, BLOCK_HEIGHT])
-        tail = tip - np.array([direction * ARROW_SCALE * abs(push), 0.0, 0.0])
-        add_arrow(scene, tail, tip, [0.9, 0.1, 0.1, 1.0])
-
-    # Blue: friction, drawn beside the block at the table top, where the rubbing happens.
-    friction = world.friction_force
-    if abs(friction) > 0.01:
-        tail = np.array([x, -(BLOCK_HALF + 0.05), TABLE_TOP + 0.01])
-        tip = tail + np.array([ARROW_SCALE * friction, 0.0, 0.0])
-        add_arrow(scene, tail, tip, [0.1, 0.4, 0.9, 1.0])
-
-
-def add_arrow(scene, tail, tip, rgba):
-    """Add one arrow from tail to tip to the window's extra drawings."""
-    geom = scene.geoms[scene.ngeom]
-    mujoco.mjv_initGeom(geom, mujoco.mjtGeom.mjGEOM_ARROW, np.zeros(3), np.zeros(3), np.zeros(9),
-                        np.array(rgba, dtype=np.float32))
-    mujoco.mjv_connector(geom, mujoco.mjtGeom.mjGEOM_ARROW, 0.008, tail, tip)
-    scene.ngeom += 1
+    show.pace()
 
 
 def main():
@@ -134,12 +90,11 @@ def main():
     args = parser.parse_args()
 
     world = BlockWorld(friction=FRICTION, mass=MASS)
-    show.wall_start = time.time()
     if args.headless:
         run(world)
     else:
         with mujoco.viewer.launch_passive(world.model, world.data) as viewer:
-            show.wall_start = time.time()
+            show.pace = RealTime(world)
             run(world, viewer)
 
 
