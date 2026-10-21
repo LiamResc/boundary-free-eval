@@ -17,7 +17,7 @@ from boundary_free.simulate import drive
 from boundary_free.viewer_tools import RealTime, draw_forces
 
 # ---- Things to change and re-run ---------------------------------------------
-TRUE_FRICTION = 0.6  # the block's real friction (static always believes 0.3)
+TRUE_FRICTION = 0.15  # the block's real friction (static always believes 0.3)
 TRUE_MASS = 1.0      # the block's real mass, in kilograms (static always believes 1.0)
 STIFFNESS = 25.0     # the controllers' stiffness (braking is matched to it, so there is no overshoot)
 WATCH = "static"     # which controller the window shows: "static" or "oracle"

@@ -5,12 +5,25 @@ with up to friction x mass x g. Below that the block sticks; above it the block 
 
     push = mass x acceleration + friction x mass x g
 """
+from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
+import numpy as np
 
 MODEL_FILE = Path(__file__).with_name("block_world.xml")
 GRAVITY = 9.81  # metres per second squared, the simulator's default
+
+# Everything the next step depends on that MuJoCo keeps in the data: for the block world, 18 numbers.
+SAVED_STATE = mujoco.mjtState.mjSTATE_INTEGRATION
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """Everything needed to carry on exactly from one moment of the block world."""
+    state: np.ndarray  # MuJoCo's saved state: the clock, position, speed, push command and bookkeeping
+    friction: float    # the hidden knobs live in the model, not the data, so MuJoCo's state leaves them out
+    mass: float
 
 
 class BlockWorld:
@@ -107,7 +120,35 @@ class BlockWorld:
         """The force the pusher actually applied on the last step, after capping, in newtons."""
         return float(self.data.actuator_force[0])
 
-    # ---- 4. For checking and drawing only (controllers must not use this) ----
+    # ---- 4. Save, restore and branch ------------------------------------------
+
+    def snapshot(self):
+        """Save this moment: MuJoCo's state plus the hidden knobs."""
+        state = np.empty(mujoco.mj_stateSize(self.model, SAVED_STATE))
+        mujoco.mj_getState(self.model, self.data, state, SAVED_STATE)
+        return Snapshot(state=state, friction=self._friction, mass=self.mass)
+
+    def restore(self, snapshot):
+        """Go back to a saved moment and carry on exactly from there.
+
+        Readings worked out during a step, such as applied_push, refer to the last step taken
+        and update on the next one.
+        """
+        self.set_friction(snapshot.friction)
+        self.set_mass(snapshot.mass)
+        mujoco.mj_setState(self.model, self.data, snapshot.state, SAVED_STATE)
+
+    def branch(self):
+        """A brand-new world at this same moment, for a "what if" run.
+
+        It has its own model and data, so nothing done in the branch, not even changing its friction or
+        mass, can leak back into this world.
+        """
+        twin = BlockWorld(friction=self._friction, mass=self.mass)
+        twin.restore(self.snapshot())
+        return twin
+
+    # ---- 5. For checking and drawing only (controllers must not use this) ----
 
     @property
     def friction_force(self):
