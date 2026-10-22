@@ -2,6 +2,9 @@
 CLAUDE.md
 dra_project_brief.md
 
+# Pictures and other results the scripts produce (re-made by running them)
+outputs/
+
 # Python
 .venv/
 __pycache__/

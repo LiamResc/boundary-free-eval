@@ -16,8 +16,8 @@ from boundary_free.simulate import drive
 # ---- Things to change and re-run ---------------------------------------------
 TRUE_FRICTION = 0.6  # static believes 0.3
 TRUE_MASS = 1.0      # static believes 1.0
-BRANCH_AT = 0.6      # seconds into the run when we take the branch
-LOOK_AHEAD = 2.0     # how long each future runs, in seconds
+BRANCH_AT = 2.0      # seconds into the run when we take the branch
+LOOK_AHEAD = 0.5     # how long each future runs, in seconds
 # -------------------------------------------------------------------------------
 
 START, TARGET = -0.3, 0.3
