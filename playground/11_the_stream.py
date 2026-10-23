@@ -17,7 +17,7 @@ from boundary_free.stream import Change, Schedule, Stream, example_schedule, run
 # ---- Things to change and re-run ---------------------------------------------
 # The hidden changes. Each is Change(at=seconds, to=new value, over=seconds the change takes; 0 is a jump).
 # Static believes friction 0.3 and mass 1.0 throughout.
-FRICTION_CHANGES = (Change(at=39, to=0.6), Change(at=81, to=0.3))
+FRICTION_CHANGES = (Change(at=39, to=0.15), Change(at=81, to=0.3))
 MASS_CHANGES = (Change(at=63, to=1.5, over=12),)
 # -------------------------------------------------------------------------------
 
