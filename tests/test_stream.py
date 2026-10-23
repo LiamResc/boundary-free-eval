@@ -47,6 +47,16 @@ def test_the_stream_sets_the_hidden_knobs_from_the_schedule():
     assert stream.world.mass == pytest.approx(1.5, abs=0.01)
 
 
+def test_a_hidden_change_is_not_one_step_late_when_the_clock_comes_out_early():
+    schedule = Schedule(targets=(0.0,) * 15, target_every=6.0, friction_start=0.6, mass_start=1.0,
+                        friction_changes=(Change(at=81.0, to=0.3),))
+    stream = Stream(schedule)
+    for _ in range(40500):  # 81 s of 0.002 s steps
+        stream.step(0.0)
+    assert stream.time < 81.0            # the summed clock reads 80.99999999999262
+    assert stream.world.friction == 0.3  # already set for the step that starts at 81 s
+
+
 def test_the_controller_is_told_only_position_speed_and_target():
     seen = Stream(example_schedule()).observe()
     assert set(vars(seen)) == {"position", "velocity", "target"}

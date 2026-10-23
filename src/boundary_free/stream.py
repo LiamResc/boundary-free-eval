@@ -12,6 +12,11 @@ from boundary_free.block_world import BlockWorld
 
 # ---- 1. The schedule: the script for the stream --------------------------------
 
+# The simulated clock adds up 0.002 s steps, so 30 s can come out as 29.999999999998. Every lookup by time adds
+# this tiny allowance first, so that a new target or a hidden change never arrives one step late.
+CLOCK_ALLOWANCE = 1e-9
+
+
 @dataclass(frozen=True)
 class Change:
     """One change to a hidden knob: starting at `at` seconds, move to `to`, taking `over` seconds."""
@@ -47,19 +52,17 @@ class Schedule:
 
     def target_index(self, time):
         """Which target is current at a given time: 0 for the first (the last one stays once the list runs out)."""
-        # The simulated clock adds up 0.002 s steps, so 30 s can come out as 29.999999999998;
-        # the tiny allowance stops that from switching targets one step late.
-        return min(int((time + 1e-9) // self.target_every), len(self.targets) - 1)
+        return min(int((time + CLOCK_ALLOWANCE) // self.target_every), len(self.targets) - 1)
 
     def target(self, time):
         """The target position at a given time."""
         return self.targets[self.target_index(time)]
 
     def friction(self, time):
-        return value_at(self.friction_start, self.friction_changes, time)
+        return value_at(self.friction_start, self.friction_changes, time + CLOCK_ALLOWANCE)
 
     def mass(self, time):
-        return value_at(self.mass_start, self.mass_changes, time)
+        return value_at(self.mass_start, self.mass_changes, time + CLOCK_ALLOWANCE)
 
     @property
     def length(self):
@@ -114,15 +117,19 @@ class Stream:
         return Observation(self.world.position, self.world.velocity, self.schedule.target(self.world.time))
 
     def step(self, push):
-        """Apply a push for one timestep. Before it, the hidden knobs are set to what the schedule says."""
+        """Apply a push for one timestep, then set the hidden knobs to what the schedule says for the next one.
+
+        So the world always holds the values for the step about to be taken, and the oracle, which reads them
+        while working out its push, is never a step behind a change.
+        """
         world = self.world
+        world.push(push)
+        world.step()
         friction, mass = self.schedule.friction(world.time), self.schedule.mass(world.time)
         if friction != world.friction:
             world.set_friction(friction)
         if mass != world.mass:
             world.set_mass(mass)
-        world.push(push)
-        world.step()
 
     def branch(self):
         """A copy of this moment for a "what if" run. The schedule is a rule of time, so it is simply shared."""
@@ -150,6 +157,7 @@ def run(stream, controller, seconds, on_step=None):
     end = stream.time + seconds
     while stream.time < end - 1e-9:
         target_index = stream.schedule.target_index(stream.time)
+        friction, mass = stream.world.friction, stream.world.mass  # the hidden values during this step
         seen = stream.observe()
         stream.step(controller.push(seen.position, seen.velocity, seen.target))
 
@@ -160,8 +168,8 @@ def run(stream, controller, seconds, on_step=None):
         record.target.append(seen.target)
         record.target_index.append(target_index)
         record.push.append(world.applied_push)
-        record.friction.append(world.friction)
-        record.mass.append(world.mass)
+        record.friction.append(friction)
+        record.mass.append(mass)
         if on_step is not None:
             on_step()
     return record
