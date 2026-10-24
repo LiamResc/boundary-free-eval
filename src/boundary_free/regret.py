@@ -23,10 +23,17 @@ CHECK_EVERY = 0.5  # seconds between checkpoints
 
 
 def look_ahead_weights(timestep, look_ahead=LOOK_AHEAD, fade_time=FADE_TIME):
-    """How much each step of the look-ahead counts: fading with time, and adding up to 1."""
+    """How much each step of the look-ahead counts (relative to the current checkpoint): 
+    fading with time, and adding up to 1.
+    
+    :param timestep: the simulation's timestep, in seconds (ex: 0.002)
+    :param look_ahead: how far ahead to look, in seconds
+    :param fade_time: how fast later moments count less, in seconds (a moment this
+    
+    :return: a numpy array of normalized weights, one per timestep, that add up to 1.0"""
     discount = math.exp(-timestep / fade_time)  # the per-step discount, gamma
-    weights = discount ** np.arange(round(look_ahead / timestep))
-    return weights / weights.sum()
+    weights = discount ** np.arange(round(look_ahead / timestep)) # 0.998, 0.996, ... (discount ** 1999 = 0.018)
+    return weights / weights.sum() # normalized weights
 
 
 def score(misses, weights):
