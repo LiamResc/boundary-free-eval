@@ -59,10 +59,13 @@ Regret is measured at a moment in time, and it tells you how much better the ora
 
 General definition (add citation):
 
-\begin{aligned}
-R(T) &= \max_{d \in \mathcal{D}} \sum_{t=1}^{T} \Big[\, J_H\big(d(\pi_t) \mid h_t\big) - J_H\big(\pi_t \mid h_t\big) \,\Big] \\[6pt]
-J_H(\pi \mid h_t) &= \mathbb{E}_{\pi}\!\left[\, \sum_{k=0}^{H-1} \gamma^{k} R_{t+k+1} \;\middle|\; h_t \right]
-\end{aligned}
+$$
+R(T) = \max_{d \in \mathcal{D}} \sum_{t=1}^{T} \Big[ J_H\big(d(\pi_t) \mid h_t\big) - J_H\big(\pi_t \mid h_t\big) \Big]
+$$
+
+$$
+J_H(\pi \mid h_t) = \mathbb{E}_{\pi}\left[ \sum_{k=0}^{H-1} \gamma^{k} R_{t+k+1} \enspace\middle|\enspace h_t \right]
+$$
 
 
 For our case, we consider only the discounted sum up to 4s into the future. 
