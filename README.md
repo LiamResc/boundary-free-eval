@@ -48,3 +48,27 @@ However, for our experiment, we will be editing the model mid run!
 Described in XML
 
 The *data* is what is happening in the world at a given time step. 
+
+## The Stream
+The stream is a single "long" continuous run with no resets. Push targets will arrive one after another, and friction and mass change along the way on a hidden schedule.
+All the controller can see is the blocks position, its speed and the current target.
+
+# Regret
+
+Regret is measured at a moment in time, and it tells you how much better the oracle controller would have done if it had taken over right then. 
+
+General definition (add citation):
+
+\begin{aligned}
+R(T) &= \max_{d \in \mathcal{D}} \sum_{t=1}^{T} \Big[\, J_H\big(d(\pi_t) \mid h_t\big) - J_H\big(\pi_t \mid h_t\big) \,\Big] \\[6pt]
+J_H(\pi \mid h_t) &= \mathbb{E}_{\pi}\!\left[\, \sum_{k=0}^{H-1} \gamma^{k} R_{t+k+1} \;\middle|\; h_t \right]
+\end{aligned}
+
+
+For our case, we consider only the discounted sum up to 4s into the future. 
+
+## Deviation
+A deviation is one specific "what if you acted differently here" alternative that you test your agent against. 
+It is a rule, **d**, that takes in the agents policy at time t, **π_t**, and gives back a different policy, **d(π_t)**, used from t onwards.
+
+You measure regret against a deviation (how much better d(π_t) would have done compared to what π_t did)
