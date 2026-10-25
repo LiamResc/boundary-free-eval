@@ -6,15 +6,18 @@ The rule, every step:
   2. push = believed mass x desired acceleration
           + believed friction x believed mass x g x direction    (computed push for friction)
 
-Static and oracle use the same rule and differ only in their beliefs.
+Static, oracle and adaptive use the same rule and differ only in their beliefs.
 """
 import math
 
 from boundary_free.block_world import GRAVITY
+from boundary_free.estimator import FORGETTING, FrictionMassEstimator
 
 STIFFNESS = 25.0            # desired acceleration per metre of miss (per second squared)
 STILL_SPEED = 1e-3          # below this speed (m/s), treat the block as still
 ASKING_ACCELERATION = 0.05  # below this desired acceleration (m/s^2), treat the controller as not asking for motion
+SLIDING_SPEED = 0.01        # above this speed (m/s), the block is surely sliding, so friction is friction x mass x g
+NOMINAL_FRICTION, NOMINAL_MASS = 0.3, 1.0  # the values a system set up once would assume
 
 
 class PushController:
@@ -55,7 +58,7 @@ def friction_direction(velocity, desired_acceleration):
 
 def static_controller(**settings):
     """Always believes friction 0.3 and mass 1 kg, like a system set up once and never updated."""
-    return PushController(friction_belief=0.3, mass_belief=1.0, **settings)
+    return PushController(friction_belief=NOMINAL_FRICTION, mass_belief=NOMINAL_MASS, **settings)
 
 
 class OracleController(PushController):
@@ -68,3 +71,45 @@ class OracleController(PushController):
     def push(self, position, velocity, target):
         self.friction_belief, self.mass_belief = self.world.friction, self.world.mass  # the cheat
         return super().push(position, velocity, target)
+
+
+class AdaptiveController(PushController):
+    """Works its beliefs out from what it sees: before each push, it learns from what its last push did.
+
+    It starts from static's beliefs and is told nothing about the true friction and mass, or when they change.
+    """
+
+    def __init__(self, timestep, push_limit, forgetting=FORGETTING, **settings):
+        super().__init__(friction_belief=NOMINAL_FRICTION, mass_belief=NOMINAL_MASS, **settings)
+        self.estimator = FrictionMassEstimator(NOMINAL_FRICTION, NOMINAL_MASS, forgetting)
+        self.timestep = timestep
+        self.push_limit = push_limit
+        self.last = None  # (speed, push) at the previous step: the memory that learning needs
+
+    def push(self, position, velocity, target):
+        # 1. Learn from what the last push did, if the block slid the same way all through the step.
+        if self.last is not None:
+            last_velocity, last_push = self.last
+            if sliding_same_way(last_velocity, velocity):
+                acceleration = (velocity - last_velocity) / self.timestep
+                self.estimator.learn(acceleration, math.copysign(1.0, velocity), last_push)
+                self.friction_belief, self.mass_belief = self.estimator.friction, self.estimator.mass
+
+        # 2. Push using the current beliefs, capped at what the pusher can give, so it knows what was applied.
+        push = super().push(position, velocity, target)
+        push = max(-self.push_limit, min(self.push_limit, push))
+        self.last = (velocity, push)
+        return push
+
+
+def sliding_same_way(speed_before, speed_after):
+    """Whether the block was clearly sliding, in one direction, for a whole step. Only then is the friction
+    exactly friction x mass x g: a still block's friction just matches the push, whatever the push is."""
+    return (abs(speed_before) > SLIDING_SPEED and abs(speed_after) > SLIDING_SPEED
+            and (speed_before > 0) == (speed_after > 0))
+
+
+def adaptive_controller(world, **settings):
+    """An adaptive controller for this world. It reads only the timestep and the push limit, which a real
+    robot knows about itself; never the friction or mass."""
+    return AdaptiveController(timestep=world.timestep, push_limit=world.push_limit, **settings)
