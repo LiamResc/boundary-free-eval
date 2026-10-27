@@ -3,8 +3,9 @@
     uv run python playground/13_adaptive.py
 
 Runs static, adaptive and oracle on the example stream and prints how each did, stretch by stretch. Then draws
-the adaptive controller's beliefs against the truth, and static's and adaptive's regret, saves the picture to
-outputs/adaptive.png and opens it in a window (add --no-show to skip that). Measuring regret twice takes ~30 s.
+what the adaptive controller measures (the block's acceleration, with each new target marked), what it believes
+against the truth, and static's and adaptive's regret, saves the picture to outputs/adaptive.png and opens it in
+a window (add --no-show to skip that). Measuring regret twice takes about 30 s.
 """
 import argparse
 from pathlib import Path
@@ -21,7 +22,7 @@ from boundary_free.stream import Change, Schedule, Stream, example_schedule, run
 # 1 never forgets, 0.999 remembers about 2 s of sliding, 0.99 about 0.2 s.
 FORGETTING = 0.99
 # The hidden changes, written as in 11_the_stream.py. Neither static nor adaptive is told about them.
-FRICTION_CHANGES = (Change(at=39, to=0.6), Change(at=81, to=0.3))
+FRICTION_CHANGES = (Change(at=39, to=0.15), Change(at=81, to=0.3))
 MASS_CHANGES = (Change(at=63, to=1.5, over=12),)
 # -------------------------------------------------------------------------------
 
@@ -40,8 +41,9 @@ def main():
     schedule = Schedule(targets=example_schedule().targets, target_every=6.0, friction_start=0.3, mass_start=1.0,
                         friction_changes=FRICTION_CHANGES, mass_changes=MASS_CHANGES)
 
-    # 1. Run each controller through the whole stream, noting the adaptive controller's beliefs at every step.
-    records, beliefs = {}, {"time": [], "friction": [], "mass": []}
+    # 1. Run each controller through the whole stream. For adaptive, also note at every step what it believes,
+    #    and how many sliding moments it has learned from so far.
+    records, beliefs = {}, {"time": [], "friction": [], "mass": [], "points": []}
     for name in NAMES:
         stream = Stream(schedule)
         controller = make(name, stream.world)
@@ -51,6 +53,7 @@ def main():
                 beliefs["time"].append(stream.time)
                 beliefs["friction"].append(controller.friction_belief)
                 beliefs["mass"].append(controller.mass_belief)
+                beliefs["points"].append(controller.estimator.points_learned)
         records[name] = run(stream, controller, schedule.length, note)
 
     # 2. Measure static's and adaptive's regret against the oracle.
@@ -128,18 +131,34 @@ def print_results(schedule, records, beliefs, regret):
 
 
 def draw(schedule, records, beliefs, regret):
-    fig, (top, middle, bottom) = plt.subplots(3, 1, sharex=True, figsize=(11, 8.5),
-                                              gridspec_kw={"height_ratios": [1, 1, 1.4]}, facecolor=SURFACE)
+    fig, (measured, top, middle, bottom) = plt.subplots(4, 1, sharex=True, figsize=(11, 10.5),
+                                                        gridspec_kw={"height_ratios": [1, 1, 1, 1.3]}, facecolor=SURFACE)
     truth = records["adaptive"]
 
-    # Top and middle: what adaptive believed, against the truth and against static's fixed beliefs.
+    # Top: something adaptive measures, not something it believes. The block's acceleration at each step is its
+    # change in speed over the step. Marks show when each new target appears; the strip along the bottom shows
+    # the moments the block was sliding, which are the only ones adaptive learns from.
+    time = np.array(truth.time)
+    acceleration = np.diff(truth.velocity, prepend=0.0) / np.diff(time, prepend=0.0)
+    learned = np.diff(beliefs["points"], prepend=0) > 0
+    measured.plot(time, acceleration, color=INK_SOFT, linewidth=0.8, label="acceleration it measures")
+    arrivals = np.arange(len(schedule.targets)) * schedule.target_every
+    measured.plot(arrivals, np.full(len(arrivals), 0.95), "v", color=INK, markersize=5,
+                  transform=measured.get_xaxis_transform(), label="a new target appears")
+    measured.fill_between(time, 0.0, 0.07, where=learned, color=COLOUR["adaptive"], alpha=0.6, linewidth=0,
+                          transform=measured.get_xaxis_transform(), label="it learns from these moments (sliding)")
+    measured.set_ylim(1.35 * acceleration.min(), 1.35 * acceleration.max())  # room for the marks and the strip
+    measured.set_ylabel("measured\nacceleration (m/s²)")
+    measured.legend(loc="lower left", frameon=False, ncols=3, labelcolor=INK_SOFT, fontsize=9, bbox_to_anchor=(0.0, 1.0))
+
+    # Second and third: what adaptive believed, against the truth and against static's fixed beliefs.
     for ax, knob, believed_by_static, label in ((top, "friction", 0.3, "friction"), (middle, "mass", 1.0, "mass (kg)")):
         ax.plot(truth.time, getattr(truth, knob), color=INK_SOFT, linewidth=1.6, label="true value (hidden)")
         ax.axhline(believed_by_static, color=COLOUR["static"], linewidth=1.2, label="static believes")
         ax.plot(beliefs["time"], beliefs[knob], color=COLOUR["adaptive"], linewidth=1.6, label="adaptive believes")
         ax.set_ylabel(label)
-    top.set_ylim(0.0, 0.9)
-    middle.set_ylim(0.6, 2.3)
+    top.set_ylim(0.0, max(0.9, 1.1 * max(beliefs["friction"])))  # wide enough to show the biggest swings
+    middle.set_ylim(min(0.6, 0.9 * min(beliefs["mass"])), max(2.3, 1.1 * max(beliefs["mass"])))
     top.legend(loc="lower left", frameon=False, ncols=3, labelcolor=INK_SOFT, fontsize=9, bbox_to_anchor=(0.0, 1.0))
 
     # Bottom: regret against the oracle at each checkpoint.
@@ -154,10 +173,10 @@ def draw(schedule, records, beliefs, regret):
     bottom.set_xlim(0, schedule.length)
     bottom.legend(loc="upper left", frameon=False, labelcolor=INK_SOFT, fontsize=9)
 
-    # Mark each hidden change on all three panels: a line for a jump, a light band for a drift.
+    # Mark each hidden change on every panel: a line for a jump, a light band for a drift.
     for knob, change, axis in ([("friction", c, top) for c in schedule.friction_changes]
                                + [("mass", c, middle) for c in schedule.mass_changes]):
-        for ax in (top, middle, bottom):
+        for ax in (measured, top, middle, bottom):
             if change.over > 0:
                 ax.axvspan(change.at, change.at + change.over, color=MUTED, alpha=0.10, linewidth=0)
             else:
@@ -165,7 +184,7 @@ def draw(schedule, records, beliefs, regret):
         axis.annotate(f"{knob} → {change.to:g}", xy=(change.at + change.over, axis.get_ylim()[1]),
                       xytext=(4, -12), textcoords="offset points", color=INK_SOFT, fontsize=8.5)
 
-    for ax in (top, middle, bottom):
+    for ax in (measured, top, middle, bottom):
         ax.set_facecolor(SURFACE)
         ax.grid(axis="y", color=GRID, linewidth=0.8)
         ax.set_axisbelow(True)
@@ -178,9 +197,9 @@ def draw(schedule, records, beliefs, regret):
         ax.xaxis.label.set_color(INK_SOFT)
 
     fig.suptitle("The adaptive controller learns friction and mass as it goes", x=0.065, ha="left", color=INK, fontsize=13)
-    fig.text(0.065, 0.93, f"Its beliefs against the hidden truth, and its regret beside static's. FORGETTING = {FORGETTING}; "
-             "no sensor noise.", ha="left", color=INK_SOFT, fontsize=9.5)
-    fig.subplots_adjust(left=0.08, right=0.83, top=0.86, bottom=0.07, hspace=0.3)
+    fig.text(0.065, 0.935, "What it measures, what it believes against the hidden truth, and its regret beside static's. "
+             f"FORGETTING = {FORGETTING}; no sensor noise.", ha="left", color=INK_SOFT, fontsize=9.5)
+    fig.subplots_adjust(left=0.08, right=0.83, top=0.88, bottom=0.06, hspace=0.35)
     OUTPUT.parent.mkdir(exist_ok=True)
     fig.savefig(OUTPUT, dpi=150, facecolor=SURFACE)
 

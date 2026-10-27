@@ -133,7 +133,8 @@ After friction changes, the old points still sit on the old line. They will bias
 Where at each step, every older points weigth is multiplied by λ. 
 
 ### Two limits to learning:
-1. It only learns while the block slides. If acceleration is 0, you have no slope (accel = 0) so you just have that push = friction. This is not plottable and you can not infer additional information from this.
+1. It only learns while the block slides. If acceleration is 0, you have no slope (accel = 0) so you just have that push = min(-push, friction) which doesnt tell you the friction force either. This is not plottable and you can not infer additional information from this.
 
-2. Acceleration needs to be varied. Similar concept, if acceleration is constant (same x value for all y values) then you can not draw a difinitively best fit line and again can not infer any information on mass or friction. 
-If acceleration is not constant but not sufficiently varied, many lines will fit the 
+2. Acceleration needs to be varied. Similar concept, if acceleration is constant (same x value for all y values) then you can not draw a difinitively best fit line and again can not infer any information on mass (though you could get an accurate estimate for friction). 
+
+### Why is it better if 
