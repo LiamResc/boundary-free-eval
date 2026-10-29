@@ -137,4 +137,5 @@ Where at each step, every older points weigth is multiplied by λ.
 
 2. Acceleration needs to be varied. Similar concept, if acceleration is constant (same x value for all y values) then you can not draw a difinitively best fit line and again can not infer any information on mass (though you could get an accurate estimate for friction). 
 
-### Why is it better if 
+### Noise
+Noise
