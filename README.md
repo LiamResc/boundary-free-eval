@@ -138,4 +138,9 @@ Where at each step, every older points weigth is multiplied by λ.
 2. Acceleration needs to be varied. Similar concept, if acceleration is constant (same x value for all y values) then you can not draw a difinitively best fit line and again can not infer any information on mass (though you could get an accurate estimate for friction). 
 
 ### Noise
-Noise
+Noise is a problem that any sensor in the real world. The sensors on a robot are no different.
+For our simple controller, we must add noise to the simulation to mimick the real world.
+
+Take noise on a speed sensor as an example. Suppose a speed sensor takes a measurement every 2ms, and we can always expect +=14mm/s as a noise level. The change in speed over 2ms is likely to be very small, because 2ms is a very short time. Because of this, the sensor reading is dominated by the noise. 
+
+Now suppose instead you take a reading every 50ms. It is natural that the difference in speed over 50ms will generally be much larger than that over 2ms. This reading will be much less dominated by noise. It is good to take many measurements, but you must consider the implications of noise in your design.
