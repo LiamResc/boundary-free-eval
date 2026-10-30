@@ -1,7 +1,7 @@
 """The stream: one long run with no resets. Targets arrive on a clock; friction and mass change on a hidden schedule.
 
 The controller is told only the block's position, its speed and the current target. It is never told the
-friction or mass, or when they change.
+friction or mass, or when they change. The speed reading can carry sensor noise, also written into the schedule.
 """
 from dataclasses import dataclass, field
 
@@ -49,6 +49,8 @@ class Schedule:
     mass_start: float
     friction_changes: tuple = ()
     mass_changes: tuple = ()
+    speed_noise: float = 0.0   # how far off a speed reading typically is, in m/s (the noise's standard deviation)
+    noise_seed: int = 0        # which noise: the same seed always gives the same noise
 
     def target_index(self, time):
         """Which target is current at a given time: 0 for the first (the last one stays once the list runs out)."""
@@ -69,8 +71,17 @@ class Schedule:
         """How long the stream runs: one interval per target, in seconds."""
         return len(self.targets) * self.target_every
 
+    def speed_noise_table(self, timestep):
+        """The error added to the speed reading at each step, written in advance from the seed. Every stream built
+        from this schedule, main run or branch, makes the same table, so a branch sees exactly the noise the main
+        run sees from that moment on (common random numbers)."""
+        steps = round(self.length / timestep) + 1
+        if self.speed_noise == 0:
+            return np.zeros(steps)
+        return np.random.default_rng(self.noise_seed).normal(0.0, self.speed_noise, steps)
 
-def example_schedule(seed=0):
+
+def example_schedule(seed=0, speed_noise=0.0):
     """The stream used in the playground demos: 20 targets, 6 s apart, 120 s in all.
 
     Friction jumps from 0.3 to 0.6 at 39 s and comes back at 81 s (a recurring condition). Mass drifts from
@@ -85,6 +96,8 @@ def example_schedule(seed=0):
         mass_start=1.0,
         friction_changes=(Change(at=39.0, to=0.6), Change(at=81.0, to=0.3)),
         mass_changes=(Change(at=63.0, to=1.5, over=12.0),),
+        speed_noise=speed_noise,
+        noise_seed=seed,
     )
 
 
@@ -107,14 +120,17 @@ class Stream:
             world = BlockWorld(friction=schedule.friction(0.0), mass=schedule.mass(0.0))
             world.data.qpos[0] = start_position
         self.world = world
+        self.speed_noise = schedule.speed_noise_table(world.timestep)
 
     @property
     def time(self):
         return self.world.time
 
     def observe(self):
-        """What the controller sees now."""
-        return Observation(self.world.position, self.world.velocity, self.schedule.target(self.world.time))
+        """What the controller sees now. The speed reading carries this step's noise; position is read exactly."""
+        world = self.world
+        step = min(round(world.time / world.timestep), len(self.speed_noise) - 1)
+        return Observation(world.position, world.velocity + self.speed_noise[step], self.schedule.target(world.time))
 
     def step(self, push):
         """Apply a push for one timestep, then set the hidden knobs to what the schedule says for the next one.
@@ -132,7 +148,8 @@ class Stream:
             world.set_mass(mass)
 
     def branch(self):
-        """A copy of this moment for a "what if" run. The schedule is a rule of time, so it is simply shared."""
+        """A copy of this moment for a "what if" run. The schedule, noise included, is a rule of time, so it is
+        simply shared."""
         return Stream(self.schedule, world=self.world.branch())
 
 
@@ -144,6 +161,7 @@ class StreamRecord:
     time: list = field(default_factory=list)
     position: list = field(default_factory=list)
     velocity: list = field(default_factory=list)
+    seen_velocity: list = field(default_factory=list)  # the speed reading the controller pushed on, noise and all
     target: list = field(default_factory=list)
     target_index: list = field(default_factory=list)  # which target was current: 0 for the first
     push: list = field(default_factory=list)
@@ -165,6 +183,7 @@ def run(stream, controller, seconds, on_step=None):
         record.time.append(world.time)
         record.position.append(world.position)
         record.velocity.append(world.velocity)
+        record.seen_velocity.append(seen.velocity)
         record.target.append(seen.target)
         record.target_index.append(target_index)
         record.push.append(world.applied_push)

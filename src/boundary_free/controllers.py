@@ -17,6 +17,7 @@ STIFFNESS = 25.0            # desired acceleration per metre of miss (per second
 STILL_SPEED = 1e-3          # below this speed (m/s), treat the block as still
 ASKING_ACCELERATION = 0.05  # below this desired acceleration (m/s^2), treat the controller as not asking for motion
 SLIDING_SPEED = 0.01        # above this speed (m/s), the block is surely sliding, so friction is friction x mass x g
+WINDOW = 25                 # sliding steps per learning point: 50 ms, which makes speed-reading noise matter 25x less
 NOMINAL_FRICTION, NOMINAL_MASS = 0.3, 1.0  # the values a system set up once would assume
 
 
@@ -74,26 +75,44 @@ class OracleController(PushController):
 
 
 class AdaptiveController(PushController):
-    """Works its beliefs out from what it sees: before each push, it learns from what its last push did.
+    """Works its beliefs out from what it sees: it learns from what its pushes did while the block slid.
 
     It starts from static's beliefs and is told nothing about the true friction and mass, or when they change.
+    It learns from stretches of `window` sliding steps: the average push over the stretch against the speed
+    change across it. Only the two speed readings at the ends carry noise, so a longer stretch divides that noise
+    by a longer time. window=1 learns from every single step, as in stage F part 1.
     """
 
-    def __init__(self, timestep, push_limit, forgetting=FORGETTING, **settings):
+    def __init__(self, timestep, push_limit, forgetting=FORGETTING, window=WINDOW, **settings):
         super().__init__(friction_belief=NOMINAL_FRICTION, mass_belief=NOMINAL_MASS, **settings)
-        self.estimator = FrictionMassEstimator(NOMINAL_FRICTION, NOMINAL_MASS, forgetting)
+        # Forgetting is counted per step, so one learning point, a stretch of `window` steps, forgets that many.
+        self.estimator = FrictionMassEstimator(NOMINAL_FRICTION, NOMINAL_MASS, forgetting ** window)
         self.timestep = timestep
         self.push_limit = push_limit
-        self.last = None  # (speed, push) at the previous step: the memory that learning needs
+        self.window = window
+        self.last = None            # (speed reading, push) at the previous step: the memory that learning needs
+        self.stretch_pushes = []    # the pushes so far in the current stretch of sliding one way
+        self.stretch_start = None   # the speed reading at the start of that stretch
+        self.last_point = None      # the latest (acceleration, average push) it learned from, for plotting
 
     def push(self, position, velocity, target):
-        # 1. Learn from what the last push did, if the block slid the same way all through the step.
+        # 1. Learn from what its pushes did. Collect `window` steps of the block sliding one way, then learn from
+        #    their average push and the speed change across them. A step that is not sliding breaks the stretch.
         if self.last is not None:
             last_velocity, last_push = self.last
             if sliding_same_way(last_velocity, velocity):
-                acceleration = (velocity - last_velocity) / self.timestep
-                self.estimator.learn(acceleration, math.copysign(1.0, velocity), last_push)
-                self.friction_belief, self.mass_belief = self.estimator.friction, self.estimator.mass
+                if not self.stretch_pushes:
+                    self.stretch_start = last_velocity
+                self.stretch_pushes.append(last_push)
+                if len(self.stretch_pushes) == self.window:
+                    acceleration = (velocity - self.stretch_start) / (self.window * self.timestep)
+                    average_push = sum(self.stretch_pushes) / self.window
+                    self.estimator.learn(acceleration, math.copysign(1.0, velocity), average_push)
+                    self.friction_belief, self.mass_belief = self.estimator.friction, self.estimator.mass
+                    self.last_point = (acceleration, average_push)
+                    self.stretch_pushes = []
+            else:
+                self.stretch_pushes = []
 
         # 2. Push using the current beliefs, capped at what the pusher can give, so it knows what was applied.
         push = super().push(position, velocity, target)

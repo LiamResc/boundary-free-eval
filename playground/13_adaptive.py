@@ -13,7 +13,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from boundary_free.controllers import OracleController, adaptive_controller, static_controller
+from boundary_free.controllers import SLIDING_SPEED, OracleController, adaptive_controller, static_controller
 from boundary_free.regret import measure_regret
 from boundary_free.stream import Change, Schedule, Stream, example_schedule, run, targets_reached
 
@@ -21,6 +21,10 @@ from boundary_free.stream import Change, Schedule, Stream, example_schedule, run
 # How much older sliding moments still count. Memory is about 1 / (1 - FORGETTING) sliding steps of 2 ms:
 # 1 never forgets, 0.999 remembers about 2 s of sliding, 0.99 about 0.2 s.
 FORGETTING = 0.99
+# How far off each speed reading typically is, in m/s (0.01 is 10 mm/s). Every controller reads the same noise.
+NOISE = 0.0
+# How many 2 ms sliding steps adaptive learns from at once: 25 is 50 ms; 1 learns from every single step.
+WINDOW = 25
 # The hidden changes, written as in 11_the_stream.py. Neither static nor adaptive is told about them.
 FRICTION_CHANGES = (Change(at=39, to=0.15), Change(at=81, to=0.3))
 MASS_CHANGES = (Change(at=63, to=1.5, over=12),)
@@ -39,11 +43,12 @@ def main():
     parser.add_argument("--no-show", action="store_true", help="save the picture without opening a window")
     args = parser.parse_args()
     schedule = Schedule(targets=example_schedule().targets, target_every=6.0, friction_start=0.3, mass_start=1.0,
-                        friction_changes=FRICTION_CHANGES, mass_changes=MASS_CHANGES)
+                        friction_changes=FRICTION_CHANGES, mass_changes=MASS_CHANGES, speed_noise=NOISE)
 
     # 1. Run each controller through the whole stream. For adaptive, also note at every step what it believes,
-    #    and how many sliding moments it has learned from so far.
-    records, beliefs = {}, {"time": [], "friction": [], "mass": [], "points": []}
+    #    and every point it learns from (when, and the acceleration it measured across that stretch).
+    records = {}
+    beliefs = {"time": [], "friction": [], "mass": [], "learned_at": [], "learned_acceleration": []}
     for name in NAMES:
         stream = Stream(schedule)
         controller = make(name, stream.world)
@@ -53,7 +58,9 @@ def main():
                 beliefs["time"].append(stream.time)
                 beliefs["friction"].append(controller.friction_belief)
                 beliefs["mass"].append(controller.mass_belief)
-                beliefs["points"].append(controller.estimator.points_learned)
+                if controller.estimator.points_learned > len(beliefs["learned_at"]):
+                    beliefs["learned_at"].append(stream.time)
+                    beliefs["learned_acceleration"].append(controller.last_point[0])
         records[name] = run(stream, controller, schedule.length, note)
 
     # 2. Measure static's and adaptive's regret against the oracle.
@@ -73,7 +80,7 @@ def make(name, world):
     if name == "static":
         return static_controller()
     if name == "adaptive":
-        return adaptive_controller(world, forgetting=FORGETTING)
+        return adaptive_controller(world, forgetting=FORGETTING, window=WINDOW)
     return OracleController(world)
 
 
@@ -96,6 +103,8 @@ def describe(schedule, start, end):
 
 def print_results(schedule, records, beliefs, regret):
     print(f"\nFORGETTING = {FORGETTING}: memory of about {1 / max(1 - FORGETTING, 1e-9):.0f} sliding steps")
+    print(f"NOISE = {1000 * NOISE:g} mm/s on each speed reading; adaptive learns from {WINDOW} steps "
+          f"({1000 * WINDOW * 0.002:g} ms) at a time, {len(beliefs['learned_at'])} points in all")
     print("\nAverage miss in each stretch of the stream (cm):")
     print(f"{'':16s}{'':38s}" + "".join(f"{name:>9s}" for name in NAMES))
     for start, end in stretches(schedule):
@@ -135,21 +144,30 @@ def draw(schedule, records, beliefs, regret):
                                                         gridspec_kw={"height_ratios": [1, 1, 1, 1.3]}, facecolor=SURFACE)
     truth = records["adaptive"]
 
-    # Top: something adaptive measures, not something it believes. The block's acceleration at each step is its
-    # change in speed over the step. Marks show when each new target appears; the strip along the bottom shows
-    # the moments the block was sliding, which are the only ones adaptive learns from.
+    # Top: what adaptive measures, not what it believes. The grey line is the acceleration from each pair of speed
+    # readings 2 ms apart, noise and all; the dots are the accelerations it actually learns from, each measured
+    # across a stretch of WINDOW steps. Marks show each new target; the strip along the bottom shows the moments
+    # the block was sliding one way, which are the only ones that feed its learning.
     time = np.array(truth.time)
-    acceleration = np.diff(truth.velocity, prepend=0.0) / np.diff(time, prepend=0.0)
-    learned = np.diff(beliefs["points"], prepend=0) > 0
-    measured.plot(time, acceleration, color=INK_SOFT, linewidth=0.8, label="acceleration it measures")
+    seen = np.array(truth.seen_velocity)
+    step_by_step = np.diff(seen, prepend=seen[0]) / np.diff(time, prepend=0.0)
+    sliding = ((np.abs(seen) > SLIDING_SPEED) & (np.abs(np.r_[0.0, seen[:-1]]) > SLIDING_SPEED)
+               & (np.sign(seen) == np.sign(np.r_[0.0, seen[:-1]])))
+    measured.plot(time, step_by_step, color=MUTED, linewidth=0.6, alpha=0.5, zorder=1, label="from readings 2 ms apart")
+    measured.plot(beliefs["learned_at"], beliefs["learned_acceleration"], "o", color=COLOUR["adaptive"], markersize=2.5,
+                  zorder=4, label=f"what it learns from: across {1000 * WINDOW * 0.002:g} ms")
     arrivals = np.arange(len(schedule.targets)) * schedule.target_every
-    measured.plot(arrivals, np.full(len(arrivals), 0.95), "v", color=INK, markersize=5,
+    measured.plot(arrivals, np.full(len(arrivals), 0.95), "v", color=INK, markersize=5, zorder=4,
                   transform=measured.get_xaxis_transform(), label="a new target appears")
-    measured.fill_between(time, 0.0, 0.07, where=learned, color=COLOUR["adaptive"], alpha=0.6, linewidth=0,
-                          transform=measured.get_xaxis_transform(), label="it learns from these moments (sliding)")
-    measured.set_ylim(1.35 * acceleration.min(), 1.35 * acceleration.max())  # room for the marks and the strip
+    measured.fill_between(time, 0.0, 0.07, where=sliding, color=COLOUR["adaptive"], alpha=0.5, linewidth=0, zorder=3,
+                          transform=measured.get_xaxis_transform(), label="sliding")
+    # Scale to the real accelerations, so heavy noise on the grey line is cut off rather than squashing everything.
+    true_acceleration = np.diff(truth.velocity, prepend=0.0) / np.diff(time, prepend=0.0)
+    lowest = min(true_acceleration.min(), min(beliefs["learned_acceleration"], default=0.0))
+    highest = max(true_acceleration.max(), max(beliefs["learned_acceleration"], default=0.0))
+    measured.set_ylim(1.35 * lowest, 1.35 * highest)  # room for the marks and the strip
     measured.set_ylabel("measured\nacceleration (m/s²)")
-    measured.legend(loc="lower left", frameon=False, ncols=3, labelcolor=INK_SOFT, fontsize=9, bbox_to_anchor=(0.0, 1.0))
+    measured.legend(loc="lower left", frameon=False, ncols=4, labelcolor=INK_SOFT, fontsize=9, bbox_to_anchor=(0.0, 1.0))
 
     # Second and third: what adaptive believed, against the truth and against static's fixed beliefs.
     for ax, knob, believed_by_static, label in ((top, "friction", 0.3, "friction"), (middle, "mass", 1.0, "mass (kg)")):
@@ -197,8 +215,9 @@ def draw(schedule, records, beliefs, regret):
         ax.xaxis.label.set_color(INK_SOFT)
 
     fig.suptitle("The adaptive controller learns friction and mass as it goes", x=0.065, ha="left", color=INK, fontsize=13)
-    fig.text(0.065, 0.935, "What it measures, what it believes against the hidden truth, and its regret beside static's. "
-             f"FORGETTING = {FORGETTING}; no sensor noise.", ha="left", color=INK_SOFT, fontsize=9.5)
+    fig.text(0.065, 0.945, "What it measures, what it believes against the hidden truth, and its regret beside static's.\n"
+             f"FORGETTING = {FORGETTING}, speed noise {1000 * NOISE:g} mm/s, learning from {1000 * WINDOW * 0.002:g} ms stretches.",
+             ha="left", va="top", color=INK_SOFT, fontsize=9.5, linespacing=1.4)
     fig.subplots_adjust(left=0.08, right=0.83, top=0.88, bottom=0.06, hspace=0.35)
     OUTPUT.parent.mkdir(exist_ok=True)
     fig.savefig(OUTPUT, dpi=150, facecolor=SURFACE)
