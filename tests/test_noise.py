@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from boundary_free.controllers import adaptive_controller, static_controller
+from boundary_free.controllers import adaptive_controller, friction_direction, static_controller, still_speed_for
 from boundary_free.regret import measure_regret
 from boundary_free.stream import Change, Schedule, Stream, run
 
@@ -44,11 +44,21 @@ def test_a_branch_sees_the_same_noise_as_the_main_run():
 
 
 def test_with_shared_noise_static_still_has_exactly_zero_regret_before_a_change():
-    # Static and the oracle believe the same until 9 s, and read the same noisy speeds, so they push identically.
+    # Static and the oracle believe the same until 9 s, read the same noisy speeds and use the same "still"
+    # threshold, so they push identically.
     record = measure_regret(schedule(0.01, friction_changes=(Change(at=9.0, to=0.6),)),
-                            lambda world: static_controller(), check_every=1.0)
+                            lambda world: static_controller(still_speed=still_speed_for(0.01)), check_every=1.0)
     by_time = dict(zip(record.times, record.regret))
     assert all(by_time[t] == 0.0 for t in (0.0, 1.0, 2.0, 3.0, 4.0))
+
+
+def test_noise_fools_a_1_mm_s_still_test_but_not_one_at_3x_the_noise():
+    # A still block (true speed 0) wanted 15 cm further on: how often does the friction push point backward?
+    readings = schedule(0.01).speed_noise_table(0.002)[:10000]
+    def backward_share(still_speed):
+        return np.mean([friction_direction(r, desired_acceleration=3.75, still_speed=still_speed) < 0 for r in readings])
+    assert backward_share(0.001) > 0.4                   # about 46%: the coin toss
+    assert backward_share(still_speed_for(0.01)) < 0.01  # about 0.15%
 
 
 def test_learning_from_50_ms_stretches_finds_friction_and_mass_through_noise():

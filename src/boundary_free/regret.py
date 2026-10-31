@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from boundary_free.controllers import OracleController
+from boundary_free.controllers import OracleController, still_speed_for
 from boundary_free.stream import Stream, StreamRecord, run
 
 LOOK_AHEAD = 4.0   # seconds each checkpoint looks ahead
@@ -63,13 +63,17 @@ class RegretRecord:
         return self.total / len(self.regret)
 
 
-def measure_regret(schedule, make_controller, make_deviation=OracleController,
+def measure_regret(schedule, make_controller, make_deviation=None,
                    look_ahead=LOOK_AHEAD, fade_time=FADE_TIME, check_every=CHECK_EVERY):
     """Run a controller through a whole stream, measuring its regret against the oracle at every checkpoint.
 
     make_controller is given the main stream's world and returns the controller to measure.
-    make_deviation is given a branch's world and returns the alternative to compare against.
+    make_deviation is given a branch's world and returns the alternative to compare against. By default it is
+    the oracle, with the "still" threshold that suits the stream's speed noise.
     """
+    if make_deviation is None:
+        def make_deviation(world):
+            return OracleController(world, still_speed=still_speed_for(schedule.speed_noise))
     stream = Stream(schedule)
     controller = make_controller(stream.world)
     weights = look_ahead_weights(stream.world.timestep, look_ahead, fade_time)

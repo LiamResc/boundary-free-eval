@@ -15,7 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from boundary_free.controllers import adaptive_controller, static_controller
+from boundary_free.controllers import adaptive_controller, static_controller, still_speed_for
 from boundary_free.regret import measure_regret
 from boundary_free.stream import Schedule, example_schedule
 
@@ -68,14 +68,15 @@ def schedule(noise, draw):
 
 
 def adaptive_regret(noise, forgetting, draw):
-    record = measure_regret(schedule(noise, draw), lambda world: adaptive_controller(world, forgetting=forgetting,
-                                                                                     window=WINDOW),
-                            check_every=CHECK_EVERY)
-    return record.rate
+    def make(world):
+        return adaptive_controller(world, forgetting=forgetting, window=WINDOW, still_speed=still_speed_for(noise))
+    return measure_regret(schedule(noise, draw), make, check_every=CHECK_EVERY).rate
 
 
 def static_regret(noise):
-    return measure_regret(schedule(noise, 0), lambda world: static_controller(), check_every=CHECK_EVERY).rate
+    def make(world):
+        return static_controller(still_speed=still_speed_for(noise))
+    return measure_regret(schedule(noise, 0), make, check_every=CHECK_EVERY).rate
 
 
 def memory(forgetting):

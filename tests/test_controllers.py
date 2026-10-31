@@ -23,6 +23,8 @@ def test_friction_part_points_the_way_the_block_moves_or_should_move():
     assert friction_direction(velocity=0.2, desired_acceleration=-5.0) == 1.0   # moving: oppose the motion
     assert friction_direction(velocity=0.0, desired_acceleration=-5.0) == -1.0  # still: the way we want to go
     assert friction_direction(velocity=0.0, desired_acceleration=0.0) == 0.0    # still and not asking: nothing
+    # With a wider "still" threshold, a 2 cm/s reading counts as still, so it points the way we want to go.
+    assert friction_direction(velocity=0.02, desired_acceleration=-5.0, still_speed=0.03) == -1.0
 
 
 @pytest.mark.parametrize("friction, mass", [(0.15, 1.0), (0.3, 1.0), (0.6, 1.0), (0.3, 0.5), (0.3, 1.5)])

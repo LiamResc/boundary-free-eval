@@ -13,7 +13,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from boundary_free.controllers import SLIDING_SPEED, OracleController, adaptive_controller, static_controller
+from boundary_free.controllers import (SLIDING_SPEED, OracleController, adaptive_controller, static_controller,
+                                       still_speed_for)
 from boundary_free.regret import measure_regret
 from boundary_free.stream import Change, Schedule, Stream, example_schedule, run, targets_reached
 
@@ -76,12 +77,14 @@ def main():
 
 
 def make(name, world):
-    """A fresh controller of the named kind. Only the oracle is allowed to read the world's friction and mass."""
+    """A fresh controller of the named kind. Only the oracle is allowed to read the world's friction and mass.
+    All three use the same "still" threshold, set from the speed sensor's noise."""
+    still_speed = still_speed_for(NOISE)
     if name == "static":
-        return static_controller()
+        return static_controller(still_speed=still_speed)
     if name == "adaptive":
-        return adaptive_controller(world, forgetting=FORGETTING, window=WINDOW)
-    return OracleController(world)
+        return adaptive_controller(world, forgetting=FORGETTING, window=WINDOW, still_speed=still_speed)
+    return OracleController(world, still_speed=still_speed)
 
 
 def stretches(schedule):
