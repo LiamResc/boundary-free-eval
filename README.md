@@ -144,3 +144,7 @@ For our simple controller, we must add noise to the simulation to mimick the rea
 Take noise on a speed sensor as an example. Suppose a speed sensor takes a measurement every 2ms, and we can always expect +=14mm/s as a noise level. The change in speed over 2ms is likely to be very small, because 2ms is a very short time. Because of this, the sensor reading is dominated by the noise. 
 
 Now suppose instead you take a reading every 50ms. It is natural that the difference in speed over 50ms will generally be much larger than that over 2ms. This reading will be much less dominated by noise. It is good to take many measurements, but you must consider the implications of noise in your design.
+
+In this project, we add noise to the speed reading. Currently (2026/10/31) noise is set to 10mm/s. 
+This is negligible when the block is moving fast, but during periods of rest or slow motion, this noise can dominate the sensor reading. 
+When the block is at rest, the noise jumps between + and - randomly. This throws off the controller, which defines "still" as under 1mm/s. To make matters worse, because the controller is wired to counter the friction force (always push in the direction of movement since friction only pushes in the direction opposite to movement), if a block at rest is measured to be moving away from the target (due to noise), then the controller beleives that the friction is pushing forward, and so the controller pushes backwards, away from the target.
