@@ -1,7 +1,9 @@
 """The stream: one long run with no resets. Targets arrive on a clock; friction and mass change on a hidden schedule.
 
 The controller is told only the block's position, its speed and the current target. It is never told the
-friction or mass, or when they change. The speed reading can carry sensor noise, also written into the schedule.
+friction or mass. In the "told" condition it also hears "something just changed" at each change, but never what
+changed; otherwise it is not told when things change either. The speed reading can carry sensor noise, also
+written into the schedule.
 """
 from dataclasses import dataclass, field
 
@@ -80,6 +82,19 @@ class Schedule:
             return np.zeros(steps)
         return np.random.default_rng(self.noise_seed).normal(0.0, self.speed_noise, steps)
 
+    def change_moments(self, drift_every=None):
+        """The moments a told controller hears "something just changed": every jump, and the start and end of
+        every drift. With drift_every (seconds), a drift is also announced that often while it lasts, as a
+        benchmark that chopped it into separate tasks would."""
+        moments = set()
+        for change in self.friction_changes + self.mass_changes:
+            moments.add(change.at)
+            if change.over > 0:
+                moments.add(change.at + change.over)
+                if drift_every:
+                    moments.update(np.arange(change.at, change.at + change.over, drift_every).tolist())
+        return tuple(sorted(moments))
+
 
 def example_schedule(seed=0, speed_noise=0.0):
     """The stream used in the playground demos: 20 targets, 6 s apart, 120 s in all.
@@ -109,28 +124,39 @@ class Observation:
     position: float
     velocity: float
     target: float
+    change_announced: bool = False  # only ever True in the told condition, at the step a change begins or ends
 
 
 class Stream:
-    """A block world whose target and hidden knobs follow a schedule."""
+    """A block world whose target and hidden knobs follow a schedule.
 
-    def __init__(self, schedule, world=None, start_position=0.0):
+    told=True is the boundary-informed condition: at each of the schedule's change moments, the observation
+    says that something just changed (see Schedule.change_moments for drift_every).
+    """
+
+    def __init__(self, schedule, world=None, start_position=0.0, told=False, drift_every=None):
         self.schedule = schedule
         if world is None:
             world = BlockWorld(friction=schedule.friction(0.0), mass=schedule.mass(0.0))
             world.data.qpos[0] = start_position
         self.world = world
         self.speed_noise = schedule.speed_noise_table(world.timestep)
+        self.told, self.drift_every = told, drift_every
+        self.announced = schedule.change_moments(drift_every) if told else ()
 
     @property
     def time(self):
         return self.world.time
 
     def observe(self):
-        """What the controller sees now. The speed reading carries this step's noise; position is read exactly."""
+        """What the controller sees now. The speed reading carries this step's noise; position is read exactly.
+        When told, a change moment that fell since the last step is announced, so each is heard exactly once."""
         world = self.world
         step = min(round(world.time / world.timestep), len(self.speed_noise) - 1)
-        return Observation(world.position, world.velocity + self.speed_noise[step], self.schedule.target(world.time))
+        now = world.time + CLOCK_ALLOWANCE
+        announced = any(now - world.timestep < moment <= now for moment in self.announced)
+        return Observation(world.position, world.velocity + self.speed_noise[step], self.schedule.target(world.time),
+                           announced)
 
     def step(self, push):
         """Apply a push for one timestep, then set the hidden knobs to what the schedule says for the next one.
@@ -148,9 +174,9 @@ class Stream:
             world.set_mass(mass)
 
     def branch(self):
-        """A copy of this moment for a "what if" run. The schedule, noise included, is a rule of time, so it is
-        simply shared."""
-        return Stream(self.schedule, world=self.world.branch())
+        """A copy of this moment for a "what if" run. The schedule, noise and announcements included, is a rule
+        of time, so it is simply shared."""
+        return Stream(self.schedule, world=self.world.branch(), told=self.told, drift_every=self.drift_every)
 
 
 # ---- 3. Running a controller on a stream ------------------------------------------
@@ -177,6 +203,8 @@ def run(stream, controller, seconds, on_step=None):
         target_index = stream.schedule.target_index(stream.time)
         friction, mass = stream.world.friction, stream.world.mass  # the hidden values during this step
         seen = stream.observe()
+        if seen.change_announced:
+            controller.told_of_change()
         stream.step(controller.push(seen.position, seen.velocity, seen.target))
 
         world = stream.world

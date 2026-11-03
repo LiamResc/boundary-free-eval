@@ -15,7 +15,10 @@ from boundary_free.block_world import GRAVITY
 
 FORGETTING = 0.99         # each learning step, older points' weight is multiplied by this; memory is about 1/(1 - this) points
 START_UNCERTAINTY = 10.0  # how unsure it is of its starting guesses: bigger means the first points move it further
-MASS_RANGE = (0.1, 10.0)  # kg: beliefs handed to the controller are kept inside these, however odd the fit
+# Beliefs handed to the controller are kept inside these, however odd the fit. The mass floor matters most: a block
+# far lighter than any this task meets would be barely pushed, so it would never slide again, and a controller
+# that believed in one could never learn its way back.
+MASS_RANGE = (0.3, 10.0)  # kg
 FRICTION_RANGE = (0.0, 2.0)
 
 
@@ -27,9 +30,15 @@ class FrictionMassEstimator:
         #    (friction x mass). Fitting friction x mass rather than friction keeps the equation a straight line.
         self.estimate = np.array([mass_guess, friction_guess * mass_guess])
         # How unsure it is about those two numbers, and how the two uncertainties are linked (the covariance).
+        self.start_uncertainty = start_uncertainty
         self.uncertainty = np.eye(2) * start_uncertainty
         self.forgetting = forgetting
         self.points_learned = 0
+
+    def become_unsure(self):
+        """Go back to being as unsure as at the start, keeping the current estimate as the starting point.
+        The next points then move the fit as much as the very first ones did."""
+        self.uncertainty = np.eye(2) * self.start_uncertainty
 
     # ---- 2. Learning from one sliding moment ---------------------------------------
 

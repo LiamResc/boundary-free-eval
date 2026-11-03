@@ -34,6 +34,9 @@ class PushController:
         # Speed readings below this count as "still". With a noisy sensor, use still_speed_for(its noise).
         self.still_speed = still_speed
 
+    def told_of_change(self):
+        """Told that friction or mass just changed (only in the told condition). This controller has no use for it."""
+
     def push(self, position, velocity, target):
         """The push to apply now, in newtons, from what a real robot could observe."""
         # 1. The acceleration we want: correct the miss, and brake against the speed.
@@ -103,6 +106,12 @@ class AdaptiveController(PushController):
         self.stretch_pushes = []    # the pushes so far in the current stretch of sliding one way
         self.stretch_start = None   # the speed reading at the start of that stretch
         self.last_point = None      # the latest (acceleration, average push) it learned from, for plotting
+
+    def told_of_change(self):
+        """In the told condition: something just changed, so become unsure again and let the coming points move
+        the fit a lot. A stretch half-collected across the change mixes before and after, so drop it."""
+        self.estimator.become_unsure()
+        self.stretch_pushes = []
 
     def push(self, position, velocity, target):
         # 1. Learn from what its pushes did. Collect `window` steps of the block sliding one way, then learn from

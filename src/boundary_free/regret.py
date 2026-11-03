@@ -63,18 +63,19 @@ class RegretRecord:
         return self.total / len(self.regret)
 
 
-def measure_regret(schedule, make_controller, make_deviation=None,
+def measure_regret(schedule, make_controller, make_deviation=None, told=False, drift_every=None,
                    look_ahead=LOOK_AHEAD, fade_time=FADE_TIME, check_every=CHECK_EVERY):
     """Run a controller through a whole stream, measuring its regret against the oracle at every checkpoint.
 
     make_controller is given the main stream's world and returns the controller to measure.
     make_deviation is given a branch's world and returns the alternative to compare against. By default it is
     the oracle, with the "still" threshold that suits the stream's speed noise.
+    told=True runs the boundary-informed condition: the controller hears each change moment announced.
     """
     if make_deviation is None:
         def make_deviation(world):
             return OracleController(world, still_speed=still_speed_for(schedule.speed_noise))
-    stream = Stream(schedule)
+    stream = Stream(schedule, told=told, drift_every=drift_every)
     controller = make_controller(stream.world)
     weights = look_ahead_weights(stream.world.timestep, look_ahead, fade_time)
 

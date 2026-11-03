@@ -58,8 +58,10 @@ def test_a_hidden_change_is_not_one_step_late_when_the_clock_comes_out_early():
 
 
 def test_the_controller_is_told_only_position_speed_and_target():
+    # Plus whether a change was just announced, which never happens unless the stream is told to announce.
     seen = Stream(example_schedule()).observe()
-    assert set(vars(seen)) == {"position", "velocity", "target"}
+    assert set(vars(seen)) == {"position", "velocity", "target", "change_announced"}
+    assert seen.change_announced is False
 
 
 def test_a_branch_sees_the_same_scheduled_future_as_the_main_run():
