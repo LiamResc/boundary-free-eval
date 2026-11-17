@@ -23,7 +23,7 @@ from boundary_free.stream import example_schedule
 # ---- Things to change and re-run ---------------------------------------------
 NOISE_LEVELS = (0.0, 0.005, 0.01)  # m/s of speed-reading noise: none (the control), the main level, the hard case
 EXAMPLE_NOISE = 0.005              # the noise for the one-stream picture of regret over time
-DRIFT_EVERY = None                 # None: the drift is announced at its start and end; 2.0: every 2 s as well
+DRIFT_EVERY = 2                 # None: the drift is announced at its start and end; 2.0: every 2 s as well
 # -------------------------------------------------------------------------------
 
 OUTPUT = Path(__file__).resolve().parent.parent / "outputs" / "boundary_gap.png"
@@ -70,16 +70,16 @@ def example_regret(condition, forgetting):
 def print_results(results):
     print(f"\nAdaptive's regret rate on {len(TEST_STREAMS)} test streams (cm), each condition with its own FORGETTING, "
           f"tuned on {len(TRAINING_STREAMS)} training streams")
-    print(f"{'noise':>8s} {'FORGETTING':>16s} {'not told':>9s} {'told':>7s} {'gap: mean [95% interval]':>27s} "
+    print(f"{'noise':>8s} {'FORGETTING':>16s} {'not told':>9s} {'told':>7s} {'not told - told [95% interval]':>31s} "
           f"{'median':>7s} {'told better':>12s} {'worst stream':>16s}")
     for noise, r in results.items():
         low, high = r.gap_interval()
         print(f"{f'{1000 * noise:g} mm/s':>8s} {r.forgetting['not told']:>7g} / {r.forgetting['told']:<7g}"
               f"{100 * r.not_told.mean():9.3f} {100 * r.told.mean():7.3f} "
-              f"{f'{100 * r.gap.mean():+.3f} [{100 * low:+.3f}, {100 * high:+.3f}]':>27s} {100 * np.median(r.gap):+7.3f}"
+              f"{f'{100 * r.gap.mean():+.3f} [{100 * low:+.3f}, {100 * high:+.3f}]':>31s} {100 * np.median(r.gap):+7.3f}"
               f" {f'{round(r.told_better * len(r.gap))} of {len(r.gap)}':>12s}"
               f" {f'{100 * r.not_told.max():.2f} / {100 * r.told.max():.2f}':>16s}")
-    print("(gap = not told minus told, so positive means being told helped; worst stream: not told / told)")
+    print("(positive means being told helped; worst stream: not told / told)")
 
 
 def draw(results, example, tuned):
@@ -109,8 +109,8 @@ def draw(results, example, tuned):
                   f"{100 * example['static'].rate:.2f} cm, off this scale)", loc="left", color=INK_SOFT, fontsize=9.5)
     top.legend(loc="center right", frameon=False, labelcolor=INK_SOFT, fontsize=8.5)
 
-    # Bottom: the gap on every test stream at each noise level. Each dot is one stream: not told's regret minus
-    # told's, so a dot above zero is a stream where being told helped. The bar is the median.
+    # Bottom: the gap on every test stream at each noise level. Each dot is one stream: regret (not told - told),
+    # so a dot above zero is a stream where being told helped. The bar is the median.
     rng = np.random.default_rng(0)
     bottom.axhline(0.0, color=AXIS, linewidth=1.0)
     for i, (noise, r) in enumerate(results.items()):
@@ -123,7 +123,7 @@ def draw(results, example, tuned):
     bottom.set_xticks(range(len(results)), [f"{1000 * n:g} mm/s" for n in results])
     bottom.set_xlim(-0.5, len(results) - 0.2)
     bottom.set_xlabel("speed noise")
-    bottom.set_ylabel("gap: not told minus told (cm)")
+    bottom.set_ylabel("regret (not told − told), cm")
     bottom.set_title(f"Every test stream ({len(TEST_STREAMS)} per noise level): above zero, being told helped",
                      loc="left", color=INK_SOFT, fontsize=9.5)
 
