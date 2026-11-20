@@ -101,7 +101,7 @@ class ArmWorld:
         self._track_qpos = self.model.joint("track").qposadr[0]
         self._track_dof = self.model.joint("track").dofadr[0]
         self._arm_qpos = np.array([self.model.joint(name).qposadr[0] for name in ARM_JOINTS])
-        self._arm_dof = np.array([self.model.joint(name).dofadr[0] for name in ARM_JOINTS])
+        self.arm_dofs = np.array([self.model.joint(name).dofadr[0] for name in ARM_JOINTS])  # their Jacobian columns
         self._tip = self.model.site("pusher_tip").id
 
         # Start at the home pose, with the motors commanded to hold it.
@@ -158,8 +158,11 @@ class ArmWorld:
         self.data.ctrl[:] = joint_angles
 
     def step(self):
-        """Advance the simulation by one timestep."""
+        """Advance the simulation by one timestep, then work out where every part of the arm now is, so that readings
+        such as tip_position, and Jacobians, describe the arm after the step rather than before it."""
         mujoco.mj_step(self.model, self.data)
+        mujoco.mj_kinematics(self.model, self.data)
+        mujoco.mj_comPos(self.model, self.data)
 
     # ---- 3. What can be observed ----------------------------------------------
 
@@ -191,7 +194,7 @@ class ArmWorld:
     @property
     def joint_velocities(self):
         """The arm's seven joint speeds, in radians per second."""
-        return self.data.qvel[self._arm_dof].copy()
+        return self.data.qvel[self.arm_dofs].copy()
 
     @property
     def tip_position(self):
