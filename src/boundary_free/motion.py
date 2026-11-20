@@ -34,7 +34,10 @@ JOINT_SPEED_LIMITS = np.array([2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26])
 MOVE_SPEED = 0.3          # how fast the ball moves when repositioning (not shoving), m/s
 MOVE_ACCELERATION = 1.0   # how quickly it speeds up and slows down, m/s^2
 CLEARANCE = 0.05          # crossing over the block, the ball's bottom passes this far above its top, metres
-GAP = 0.01                # ready to shove, the ball waits this far from the block's face, metres
+STANDOFF = 0.01           # ready to shove, the ball waits this far from the block's face, metres: more than the
+                          # uncertainty in where ball and block are, so getting ready never nudges the block, yet
+                          # small, as the ball strikes the block at sqrt(2 x A_PUSH x STANDOFF) and the smallest
+                          # possible move is A_PUSH x STANDOFF / (friction x g)
 
 
 # ---- 1. Trajectories: where the ball should be, moment by moment ------------------------
@@ -112,9 +115,9 @@ class Trajectory:
 
 def ready_point(block_position, push_direction):
     """Where the ball waits before shoving the block towards push_direction (+1 along the track's +y, -1 along -y):
-    level with the block's centre, a GAP away from the face it will push."""
+    level with the block's centre, a STANDOFF away from the face it will push."""
     centre = np.array([TRACK_X, 0.0, BLOCK_HALF_SIZE]) + block_position * TRACK_AXIS
-    return centre - push_direction * (BLOCK_HALF_SIZE + BALL_RADIUS + GAP) * TRACK_AXIS
+    return centre - push_direction * (BLOCK_HALF_SIZE + BALL_RADIUS + STANDOFF) * TRACK_AXIS
 
 
 def trajectory_to_ready(tip, block_position, push_direction):
@@ -191,7 +194,7 @@ A_BRAKE = 8.0   # how hard it then brakes, m/s^2. This must beat friction x g, o
 class Shove:
     """A trajectory that shoves the block along its track, starting at the ready point.
 
-    The ball speeds up at push_acceleration to release_speed, carrying the block once it has crossed the GAP, then
+    The ball speeds up at push_acceleration to release_speed, carrying the block once it has crossed the STANDOFF, then
     brakes at brake_acceleration to rest. As the braking starts, the block leaves the ball and slides on alone, slowed
     only by friction. While the block is carried, the stiff arm moves it on the ball's trajectory whatever its
     friction; after release, friction alone decides how far it slides.
@@ -224,7 +227,7 @@ class Shove:
 
 def block_travel(release_speed, friction, push_acceleration=A_PUSH):
     """How far a shove from the ready point moves the block, in metres: it is carried v^2 / (2 x push_acceleration),
-    less the GAP the ball covers before touching it, then slides v^2 / (2 x friction x g)."""
-    carried = release_speed**2 / (2 * push_acceleration) - GAP
+    less the STANDOFF the ball covers before touching it, then slides v^2 / (2 x friction x g)."""
+    carried = release_speed**2 / (2 * push_acceleration) - STANDOFF
     slide = release_speed**2 / (2 * friction * GRAVITY)
     return carried + slide

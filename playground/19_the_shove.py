@@ -19,12 +19,12 @@ import numpy as np
 
 from boundary_free.arm_world import TRACK_AXIS, ArmWorld
 from boundary_free.block_world import GRAVITY
-from boundary_free.motion import (A_BRAKE, A_PUSH, GAP, JOINT_SPEED_LIMITS, PusherMotion, Shove, block_travel,
+from boundary_free.motion import (A_BRAKE, A_PUSH, STANDOFF, JOINT_SPEED_LIMITS, PusherMotion, Shove, block_travel,
                                   trajectory_to_ready)
 from boundary_free.viewer_tools import RealTime
 
 # ---- Things to change and re-run ---------------------------------------------
-FRICTION = 0.35      # the block's friction coefficient
+FRICTION = 0.01      # the block's friction coefficient
 RELEASE_SPEED = 0.6  # how fast the ball is going when it starts braking, m/s
 BRAKE = A_BRAKE      # how hard the ball brakes, m/s^2 (8). Try 3 with FRICTION = 0.4: below friction x g, no release
 DIRECTION = +1       # +1 shoves towards +y (the robot's left), -1 towards -y
@@ -77,7 +77,7 @@ def run(world, viewer=None):
                 viewer.sync()
                 pace()
 
-    # 1. Get ready: the ball beside the block, a GAP from the face it will push.
+    # 1. Get ready: the ball beside the block, a STANDOFF from the face it will push.
     motion.follow(trajectory_to_ready(world.tip_position, world.position, DIRECTION))
     steer(motion.trajectory.duration + 0.3)
 
@@ -99,7 +99,7 @@ def report(r):
     released_at = (r["position"][last + 1] - r["start"]) * DIRECTION
     release_speed = r["block"][last + 1]
     total = (r["position"][-1] - r["start"]) * DIRECTION
-    carried_plan = v**2 / (2 * A_PUSH) - GAP
+    carried_plan = v**2 / (2 * A_PUSH) - STANDOFF
     slide_plan = v**2 / (2 * FRICTION * GRAVITY)
     print(f"friction {FRICTION}, release speed {v} m/s, speeding up at {A_PUSH} and braking at {BRAKE} m/s^2")
     print(f"friction x g = {FRICTION * GRAVITY:.2f} m/s^2: braking {'beats' if BRAKE > FRICTION * GRAVITY else 'does NOT beat'} it\n")

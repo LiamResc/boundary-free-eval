@@ -92,7 +92,7 @@ def test_braking_more_gently_than_friction_x_g_carries_the_block_to_a_stop():
         apart = 0 if touching else apart + 1
         longest = max(longest, apart)
     assert longest * 0.002 <= 0.015
-    carried = abs(the_shove.end[1] - the_shove.start[1]) - 0.01      # where the ball stopped, less the gap
+    carried = abs(the_shove.end[1] - the_shove.start[1]) - 0.01      # where the ball stopped, less the standoff
     assert log[-1][1] - start == pytest.approx(carried, abs=3e-3)
     # The arm, not friction, decides where it stops.
     _, start_rough, log_rough = shove(0.6, 0.6, brake=3.0)
