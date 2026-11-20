@@ -1,7 +1,7 @@
 """Moving the pusher: the task-space position controller of stage 1, steering the arm world's ball tip.
 
 Every step, as in playground/06, plus one addition (velocity feedforward):
-  1. The reference, where the ball should be right now, moves along a straight-line path, speeding up and slowing
+  1. The reference, where the ball should be right now, moves along a straight-line trajectory, speeding up and slowing
      down smoothly.
   2. The end-effector position error: the reference minus where the ball is.
   3. A fresh Jacobian for the arm's current pose: how the ball moves per small turn of each joint.
@@ -13,7 +13,7 @@ Every step, as in playground/06, plus one addition (velocity feedforward):
      10 mm at 0.1 m/s). With it, the motor's damping works against the difference between the joint's speed and
      its reference speed, not against all of its speed, so nothing has to trail.
 
-Paths to a shove go over the block, never through it.
+Trajectories to a shove go over the block, never through it.
 """
 from dataclasses import dataclass
 
@@ -35,7 +35,7 @@ CLEARANCE = 0.05          # crossing over the block, the ball's bottom passes th
 GAP = 0.01                # ready to shove, the ball waits this far from the block's face, metres
 
 
-# ---- 1. Paths: where the ball should be, moment by moment ------------------------
+# ---- 1. Trajectories: where the ball should be, moment by moment ------------------------
 
 @dataclass(frozen=True)
 class Segment:
@@ -78,15 +78,16 @@ class Segment:
         return self.start + covered * direction, speed * direction
 
 
-class Path:
-    """Straight segments, one after another."""
+class Trajectory:
+    """Straight segments, one after another: a route plus when to be where along it (a path alone is just the
+    route)."""
 
     def __init__(self, segments):
         self.segments = list(segments)
 
     @classmethod
     def through(cls, points, top_speed=MOVE_SPEED, acceleration=MOVE_ACCELERATION):
-        """A path through these points, in order, stopping at each."""
+        """A trajectory through these points, in order, stopping at each."""
         points = [np.asarray(p, dtype=float) for p in points]
         return cls(Segment(a, b, top_speed, acceleration) for a, b in zip(points, points[1:]))
 
@@ -99,7 +100,7 @@ class Path:
         return self.segments[-1].goal
 
     def reference(self, t):
-        """Where the ball should be t seconds into the path, and its velocity. After the end: the end, at rest."""
+        """Where the ball should be t seconds into the trajectory, and its velocity. After the end: the end, at rest."""
         for segment in self.segments:
             if t <= segment.duration:
                 return segment.reference(t)
@@ -114,24 +115,24 @@ def ready_point(block_position, push_direction):
     return centre - push_direction * (BLOCK_HALF_SIZE + BALL_RADIUS + GAP) * TRACK_AXIS
 
 
-def path_to_ready(tip, block_position, push_direction):
-    """A path that takes the ball from `tip` to the ready point. If the ball is already clear of the block on the
+def trajectory_to_ready(tip, block_position, push_direction):
+    """A trajectory that takes the ball from `tip` to the ready point. If the ball is already clear of the block on the
     side it pushes from, it goes straight there; otherwise it goes up, across above the block, and down."""
     ready = ready_point(block_position, push_direction)
     behind = (np.dot(tip, TRACK_AXIS) - block_position) * push_direction  # negative on the side it pushes from
     if behind < -(BLOCK_HALF_SIZE + BALL_RADIUS):
-        return Path.through([tip, ready])
+        return Trajectory.through([tip, ready])
     above = 2 * BLOCK_HALF_SIZE + CLEARANCE + BALL_RADIUS  # the ball's centre height when crossing over
     up = np.array([tip[0], tip[1], max(tip[2], above)])
     across = np.array([ready[0], ready[1], above])
-    return Path.through([p for p, q in zip([tip, up, across, ready], [None, tip, up, across])
+    return Trajectory.through([p for p, q in zip([tip, up, across, ready], [None, tip, up, across])
                          if q is None or np.linalg.norm(p - q) > 1e-9])
 
 
 # ---- 2. The task-space position controller ---------------------------------------
 
 class PusherMotion:
-    """Steers the arm so the pusher's ball follows a path."""
+    """Steers the arm so the pusher's ball follows a trajectory."""
 
     def __init__(self, world):
         self.world = world
@@ -139,22 +140,22 @@ class PusherMotion:
         self._jacobian = np.zeros((3, world.model.nv))
         # Each motor's damping / stiffness (kv / kp), read from the model: 0.1 s for every FR3 motor.
         self.lead = -world.model.actuator_biasprm[:, 2] / world.model.actuator_gainprm[:, 0]
-        self.path, self._started = None, 0.0
+        self.trajectory, self._started = None, 0.0
 
-    def follow(self, path):
-        """Start following a path now."""
-        self.path, self._started = path, self.world.time
+    def follow(self, trajectory):
+        """Start following a trajectory now."""
+        self.trajectory, self._started = trajectory, self.world.time
 
     @property
     def done(self):
-        """Whether the reference has reached the end of the path (the ball may still be settling)."""
-        return self.path is None or self.world.time - self._started >= self.path.duration
+        """Whether the reference has reached the end of the trajectory (the ball may still be settling)."""
+        return self.trajectory is None or self.world.time - self._started >= self.trajectory.duration
 
     def update(self):
         """Work out this step's motor commands and give them to the arm. Returns the end-effector position error."""
         world = self.world
         # 1. The reference: where the ball should be now, and how fast it should be moving.
-        reference, velocity = self.path.reference(world.time - self._started)
+        reference, velocity = self.trajectory.reference(world.time - self._started)
 
         # 2. The end-effector position error, in metres.
         error = reference - world.tip_position

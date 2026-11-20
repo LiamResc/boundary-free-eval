@@ -4,16 +4,16 @@ import numpy as np
 import pytest
 
 from boundary_free.arm_world import BALL_RADIUS, BLOCK_HALF_SIZE, ArmWorld
-from boundary_free.motion import (CLEARANCE, JOINT_SPEED_LIMITS, Path, PusherMotion, Segment, path_to_ready,
-                                  ready_point)
+from boundary_free.motion import (CLEARANCE, JOINT_SPEED_LIMITS, PusherMotion, Segment, Trajectory, ready_point,
+                                  trajectory_to_ready)
 
 
-def follow(world, motion, path, settle=0.5):
-    """Follow a path, then hold its end for `settle` seconds. Returns the errors, ball positions, joint speeds and
+def follow(world, motion, trajectory, settle=0.5):
+    """Follow a trajectory, then hold its end for `settle` seconds. Returns the errors, ball positions, joint speeds and
     whether the block was ever touched."""
-    motion.follow(path)
+    motion.follow(trajectory)
     errors, tips, speeds, touched = [], [], [], False
-    end = world.time + path.duration + settle
+    end = world.time + trajectory.duration + settle
     while world.time < end - 1e-9:
         errors.append(np.linalg.norm(motion.update()))
         world.step()
@@ -48,7 +48,7 @@ def test_the_ball_follows_a_straight_line_and_stops_on_the_goal():
     motion = PusherMotion(world)
     start = world.tip_position
     goal = start + np.array([0.0, 0.2, -0.1])
-    errors, tips, _, _ = follow(world, motion, Path.through([start, goal]))
+    errors, tips, _, _ = follow(world, motion, Trajectory.through([start, goal]))
     direction = (goal - start) / np.linalg.norm(goal - start)
     off_line = np.linalg.norm(np.cross(tips - start, direction), axis=1)
     assert off_line.max() < 2e-3                        # metres
@@ -62,8 +62,8 @@ def test_velocity_feedforward_removes_the_lag():
         if lead is not None:
             motion.lead = np.full(7, lead)
         start = world.tip_position
-        path = Path.through([start, start + np.array([0.0, 0.3, 0.0])], top_speed=0.3, acceleration=1.0)
-        errors, _, _, _ = follow(world, motion, path, settle=0.0)
+        trajectory = Trajectory.through([start, start + np.array([0.0, 0.3, 0.0])], top_speed=0.3, acceleration=1.0)
+        errors, _, _, _ = follow(world, motion, trajectory, settle=0.0)
         times = np.arange(len(errors)) * world.timestep
         return errors[(times > 0.4) & (times < 0.9)].mean()  # during the cruise at 0.3 m/s
 
@@ -77,8 +77,8 @@ def test_getting_ready_to_shove_goes_over_the_block_without_touching_it(push_dir
     motion = PusherMotion(world)
     # First to the ready point on one side, then across to the other side, which means passing over the block.
     for direction in (push_direction, -push_direction):
-        path = path_to_ready(world.tip_position, world.position, direction)
-        _, tips, speeds, touched = follow(world, motion, path)
+        trajectory = trajectory_to_ready(world.tip_position, world.position, direction)
+        _, tips, speeds, touched = follow(world, motion, trajectory)
         assert np.linalg.norm(tips[-1] - ready_point(world.position, direction)) < 1e-3
         assert not touched
         assert world.position == 0.0                   # the block has not moved at all
@@ -90,5 +90,5 @@ def test_getting_ready_to_shove_goes_over_the_block_without_touching_it(push_dir
 def test_from_the_pushing_side_the_ball_goes_straight_to_the_ready_point():
     world = ArmWorld()
     tip = ready_point(0.0, +1) + np.array([0.0, -0.1, 0.05])  # clear of the block, on the side it pushes from
-    path = path_to_ready(tip, 0.0, +1)
-    assert len(path.segments) == 1
+    trajectory = trajectory_to_ready(tip, 0.0, +1)
+    assert len(trajectory.segments) == 1

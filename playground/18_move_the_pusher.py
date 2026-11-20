@@ -15,7 +15,7 @@ import mujoco.viewer
 import numpy as np
 
 from boundary_free.arm_world import BALL_RADIUS, BLOCK_HALF_SIZE, ArmWorld
-from boundary_free.motion import JOINT_SPEED_LIMITS, PusherMotion, path_to_ready, ready_point
+from boundary_free.motion import JOINT_SPEED_LIMITS, PusherMotion, Trajectory, ready_point, trajectory_to_ready
 from boundary_free.viewer_tools import RealTime
 
 # ---- Things to change and re-run ---------------------------------------------
@@ -36,11 +36,12 @@ def run(world, viewer=None):
     print("  move              time   tracking error (mm)   end error   fastest joint      lowest over    block")
     print("                     (s)    mean while moving      (mm)     (share of limit)   the block (mm)  touched")
     for direction in MOVES:
-        path = path_to_ready(world.tip_position, world.position, direction)
-        path = type(path).through([s.start for s in path.segments] + [path.end], top_speed=SPEED)
-        motion.follow(path)
+        corners = trajectory_to_ready(world.tip_position, world.position, direction)
+        # The same corners, covered at SPEED.
+        trajectory = Trajectory.through([s.start for s in corners.segments] + [corners.end], top_speed=SPEED)
+        motion.follow(trajectory)
         errors, speeds, over, touched = [], [], [], False
-        end = world.time + path.duration + SETTLE
+        end = world.time + trajectory.duration + SETTLE
         while world.time < end - 1e-9:
             error = motion.update()
             world.step()
@@ -53,14 +54,14 @@ def run(world, viewer=None):
             touched |= any("block" in (world.model.geom(c.geom1).name, world.model.geom(c.geom2).name)
                            for c in world.data.contact[:world.data.ncon])
             if viewer is not None:
-                draw_reference(viewer, motion.path.reference(world.time - motion._started)[0])
+                draw_reference(viewer, motion.trajectory.reference(world.time - motion._started)[0])
                 viewer.sync()
                 pace()
         end_error = np.linalg.norm(world.tip_position - ready_point(world.position, direction))
         lowest = f"{1000 * min(over):6.1f}" if over else "     -"
-        print(f"  ready to push {'+y' if direction > 0 else '-y'}  {path.duration:5.2f}   {1000 * np.mean(errors):8.2f}"
-              f"              {1000 * end_error:6.2f}       {100 * np.max(speeds):5.1f}%          {lowest}       "
-              f"{'yes' if touched else 'no'}")
+        print(f"  ready to push {'+y' if direction > 0 else '-y'}  {trajectory.duration:5.2f}   "
+              f"{1000 * np.mean(errors):8.2f}              {1000 * end_error:6.2f}       "
+              f"{100 * np.max(speeds):5.1f}%          {lowest}       {'yes' if touched else 'no'}")
 
 
 def draw_reference(viewer, point):
