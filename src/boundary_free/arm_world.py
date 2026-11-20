@@ -34,6 +34,11 @@ BLOCK_HALF_SIZE = 0.05                 # a 10 cm cube, as in the block world
 ROD_LENGTH, ROD_RADIUS = 0.10, 0.01    # the pusher: a rod sticking out of the flange...
 BALL_RADIUS = 0.02                     # ...ending in a ball whose centre is ROD_LENGTH + BALL_RADIUS from the flange
 ROD_MASS, BALL_MASS = 0.10, 0.05       # kilograms
+# How quickly MuJoCo pushes the pusher and the block apart when they overlap, in seconds. MuJoCo's default, 0.02, is
+# springy: under a push the ball sinks 2-3 mm into the block, and the spring keeps the block in contact as the ball
+# starts braking, so the block is carried instead of released. A hard ball on a block is far stiffer than that.
+# (0.005 is above the simulator's stability floor of two timesteps.)
+CONTACT_TIME_CONSTANT = 0.005
 
 # Collision groups. Two shapes touch if one's contype shares a bit with the other's conaffinity.
 ARM, TABLE, BLOCK = 1, 2, 4
@@ -88,6 +93,10 @@ def build_scene():
     table, block_geom = spec.geom("table"), spec.geom("block")
     table.contype, table.conaffinity = TABLE, ARM
     block_geom.contype, block_geom.conaffinity = BLOCK, ARM
+
+    # 7. A stiff contact between the pusher and the block, so a shove releases the block cleanly.
+    for name in ("pusher_rod", "pusher_ball", "block"):
+        spec.geom(name).solref = [CONTACT_TIME_CONSTANT, 1.0]
     return spec
 
 
@@ -103,6 +112,8 @@ class ArmWorld:
         self._arm_qpos = np.array([self.model.joint(name).qposadr[0] for name in ARM_JOINTS])
         self.arm_dofs = np.array([self.model.joint(name).dofadr[0] for name in ARM_JOINTS])  # their Jacobian columns
         self._tip = self.model.site("pusher_tip").id
+        self._block_geom = self.model.geom("block").id
+        self._pusher_geoms = {self.model.geom("pusher_rod").id, self.model.geom("pusher_ball").id}
 
         # Start at the home pose, with the motors commanded to hold it.
         mujoco.mj_resetDataKeyframe(self.model, self.data, self.model.key("home").id)
@@ -209,3 +220,9 @@ class ArmWorld:
         rows = ((self.data.efc_type == mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF)
                 & (self.data.efc_id == self._track_dof))
         return float(self.data.efc_force[rows].sum())
+
+    @property
+    def pusher_touches_block(self):
+        """Whether the pusher (its ball or its rod) was touching the block on the last step."""
+        return any({c.geom1, c.geom2} & self._pusher_geoms and self._block_geom in (c.geom1, c.geom2)
+                   for c in self.data.contact[:self.data.ncon])

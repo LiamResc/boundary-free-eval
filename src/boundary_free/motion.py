@@ -13,7 +13,8 @@ Every step, as in playground/06, plus one addition (velocity feedforward):
      10 mm at 0.1 m/s). With it, the motor's damping works against the difference between the joint's speed and
      its reference speed, not against all of its speed, so nothing has to trail.
 
-Trajectories to a shove go over the block, never through it.
+Trajectories to a shove go over the block, never through it. The shove itself is a trajectory too (section 3): the
+ball speeds up along the track carrying the block, then brakes hard, and the block slides on alone.
 """
 from dataclasses import dataclass
 
@@ -21,6 +22,7 @@ import mujoco
 import numpy as np
 
 from boundary_free.arm_world import BALL_RADIUS, BLOCK_HALF_SIZE, TRACK_AXIS, TRACK_X
+from boundary_free.block_world import GRAVITY
 
 CAUTION = 1e-4   # the damping in damped least squares: keeps the answer calm in awkward poses (as in 06)
 MAX_TURN = 0.2   # safety limit on any motor's turn, in radians (as in 06); normal moves never reach it
@@ -176,3 +178,53 @@ class PusherMotion:
         # 5. Command each motor: current angle, plus turn, plus lead (velocity feedforward).
         world.command(world.joint_angles + turns + self.lead * speeds)
         return error
+
+
+# ---- 3. The shove ------------------------------------------------------------------
+
+A_PUSH = 3.0    # how hard the ball speeds up while carrying the block, m/s^2
+A_BRAKE = 8.0   # how hard it then brakes, m/s^2. This must beat friction x g, or the block stays pressed against the
+                # ball and is carried to a stop rather than released. 8 releases cleanly for any friction below about
+                # 0.8, and keeps the real FR3's joint accelerations under its 10 rad/s^2 limit.
+
+
+class Shove:
+    """A trajectory that shoves the block along its track, starting at the ready point.
+
+    The ball speeds up at push_acceleration to release_speed, carrying the block once it has crossed the GAP, then
+    brakes at brake_acceleration to rest. As the braking starts, the block leaves the ball and slides on alone, slowed
+    only by friction. While the block is carried, the stiff arm moves it on the ball's trajectory whatever its
+    friction; after release, friction alone decides how far it slides.
+    """
+
+    def __init__(self, start, push_direction, release_speed, push_acceleration=A_PUSH, brake_acceleration=A_BRAKE):
+        self.start = np.asarray(start, dtype=float)
+        self.direction = push_direction * TRACK_AXIS        # +1 shoves along the track's +y, -1 along -y
+        self.release_speed = release_speed
+        self.push_acceleration, self.brake_acceleration = push_acceleration, brake_acceleration
+        self.release_time = release_speed / push_acceleration  # when the braking starts
+        self.duration = self.release_time + release_speed / brake_acceleration
+
+    @property
+    def end(self):
+        return self.reference(self.duration)[0]
+
+    def reference(self, t):
+        """Where the ball should be t seconds into the shove, and its velocity: (metres, metres per second)."""
+        t = min(max(t, 0.0), self.duration)
+        v, a_push, a_brake = self.release_speed, self.push_acceleration, self.brake_acceleration
+        if t < self.release_time:                           # speeding up, carrying the block
+            covered, speed = 0.5 * a_push * t**2, a_push * t
+        else:                                               # braking; the block slides on alone
+            after = t - self.release_time
+            covered = 0.5 * v * self.release_time + v * after - 0.5 * a_brake * after**2
+            speed = v - a_brake * after
+        return self.start + covered * self.direction, speed * self.direction
+
+
+def block_travel(release_speed, friction, push_acceleration=A_PUSH):
+    """How far a shove from the ready point moves the block, in metres: it is carried v^2 / (2 x push_acceleration),
+    less the GAP the ball covers before touching it, then slides v^2 / (2 x friction x g)."""
+    carried = release_speed**2 / (2 * push_acceleration) - GAP
+    slide = release_speed**2 / (2 * friction * GRAVITY)
+    return carried + slide
