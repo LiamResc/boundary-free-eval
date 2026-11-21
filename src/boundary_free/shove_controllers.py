@@ -10,22 +10,26 @@ A wrong estimate leaves the carried part alone and makes the slide (estimate / t
 one, so the block undershoots or overshoots, and the rule shoves again: a correction shove, from the same side
 after an undershoot, from the other side (over the block) after an overshoot.
 
-Mass plays no part: the arm carries the block whatever it weighs, and a free slide's length does not depend on it.
+The controllers see the block only through a sensor: noisy readings of its position and speed. The arm's own
+position comes from its joint encoders, exactly. Mass plays no part: the arm carries the block whatever it weighs,
+and a free slide's length does not depend on it.
 """
 import math
 from dataclasses import dataclass
 
 from boundary_free.block_world import GRAVITY
-from boundary_free.controllers import NOMINAL_FRICTION
+from boundary_free.controllers import NOMINAL_FRICTION, SLIDING_SPEED, WINDOW, still_speed_for
+from boundary_free.estimator import FRICTION_FORGETTING, FrictionEstimator
 from boundary_free.motion import A_PUSH, STANDOFF, PusherMotion, Shove, trajectory_to_ready
+from boundary_free.sensing import BlockSensor
 
 TOLERANCE = 0.01    # within this of the target counts as there, metres
 TOP_SPEED = 1.0     # the fastest release, m/s; a longer move takes more than one shove
 # The slowest release that still reaches the block: the ball must cover the STANDOFF while speeding up. A little
 # above it, so the ball always arrives.
 MIN_SPEED = 1.05 * math.sqrt(2 * A_PUSH * STANDOFF)
-STILL_SPEED = 1e-3  # below this speed reading (m/s), the block counts as still...
-STILL_TIME = 0.1    # ...once it has stayed below it this long, seconds
+STILL_TIME = 0.1    # the block counts as still once its speed reading has stayed under the still threshold this long
+FREE_SLIDE_MARGIN = 0.02  # seconds after braking starts before a slide counts as free (the block has left the ball)
 
 
 def release_speed(distance, friction):
@@ -37,8 +41,8 @@ def release_speed(distance, friction):
 class ShoveDecision:
     """One decision to shove, as the controller saw it."""
     time: float              # seconds
-    block_position: float    # where the block was, along its track, metres
-    block_speed: float       # its speed reading then, m/s (always below STILL_SPEED: it decides only when still)
+    block_position: float    # where it saw the block: its position readings averaged over the still spell, metres
+    block_speed: float       # its speed reading then, m/s (always under the still threshold: it decides only when still)
     target: float            # where it was meant to go, metres
     direction: int           # +1 pushes along the track's +y, -1 along -y
     release_speed: float     # m/s
@@ -48,60 +52,77 @@ class ShoveDecision:
 class ShoveController:
     """The shove rule, steering the arm through its motion layer. Call update(target) once per step."""
 
-    def __init__(self, world, friction_belief, tolerance=TOLERANCE, top_speed=TOP_SPEED):
+    def __init__(self, world, friction_belief, tolerance=TOLERANCE, top_speed=TOP_SPEED, sensor=None):
         self.world = world
+        self.sensor = BlockSensor(world) if sensor is None else sensor
+        # Speed readings under this count as "still": 3 times the sensor's noise, and never under 1 mm/s (stage F).
+        self.still_speed = still_speed_for(self.sensor.speed_noise)
         self.motion = PusherMotion(world)
         self.friction_belief = friction_belief
         self.tolerance, self.top_speed = tolerance, top_speed
         self.phase = "waiting"      # waiting -> getting ready -> shoving -> waiting
         self.decisions = []         # every ShoveDecision, in order
-        self._still_since = None
         self._plan = None
+        self._still_since, self._still_sum, self._still_count = None, 0.0, 0
 
     def belief(self):
         """The friction estimate to plan with. Static keeps its own; the oracle and adaptive override this."""
         return self.friction_belief
 
     def update(self, target):
-        """Decide, or carry on with the current shove, then give the arm this step's motor commands."""
+        """Read the sensor, learn (adaptive only), decide or carry on with the current shove, then steer the arm."""
         world, motion = self.world, self.motion
 
-        # 1. Waiting: once the block has been still for STILL_TIME, decide whether, where and how hard to shove.
-        if self.phase == "waiting" and self._block_has_settled():
-            miss = target - world.position
+        # 1. What it sees of the block now.
+        position, speed = self.sensor.position(), self.sensor.speed()
+
+        # 2. Learn from what it sees (only the adaptive controller does anything here).
+        self._learn(speed)
+
+        # 3. Waiting: once the block has been still for STILL_TIME, decide whether, where and how hard to shove,
+        #    from its position readings averaged over the still spell.
+        if self.phase == "waiting" and self._block_has_settled(position, speed):
+            seen = self._still_sum / self._still_count
+            miss = target - seen
             if abs(miss) > self.tolerance:
-                self._decide(target, miss)
-                motion.follow(trajectory_to_ready(world.tip_position, world.position, self._plan.direction))
+                self._decide(target, miss, seen, speed)
+                motion.follow(trajectory_to_ready(world.tip_position, seen, self._plan.direction))
                 self.phase = "getting ready"
 
-        # 2. Getting ready: when the ball reaches the ready point, shove.
+        # 4. Getting ready: when the ball reaches the ready point, shove.
         elif self.phase == "getting ready" and motion.done:
             motion.follow(Shove(world.tip_position, self._plan.direction, self._plan.release_speed))
             self.phase = "shoving"
 
-        # 3. Shoving: when the ball has braked to rest, wait for the block to stop sliding.
+        # 5. Shoving: when the ball has braked to rest, wait for the block to stop sliding.
         elif self.phase == "shoving" and motion.done:
-            self.phase, self._still_since = "waiting", None
+            self.phase = "waiting"
+            self._still_since, self._still_sum, self._still_count = None, 0.0, 0
 
-        # Steer the arm (before the first shove it simply holds its pose).
+        # 6. Steer the arm (before the first shove it simply holds its pose).
         if motion.trajectory is not None:
             motion.update()
 
-    def _decide(self, target, miss):
+    def _learn(self, speed):
+        """Nothing to learn for a controller whose estimate is fixed or handed to it."""
+
+    def _decide(self, target, miss, seen, speed):
         friction = self.belief()
-        speed = min(self.top_speed, max(MIN_SPEED, release_speed(abs(miss), friction)))
-        self._plan = ShoveDecision(time=self.world.time, block_position=self.world.position,
-                                   block_speed=self.world.velocity, target=target, direction=1 if miss > 0 else -1,
-                                   release_speed=speed, friction_belief=friction)
+        release = min(self.top_speed, max(MIN_SPEED, release_speed(abs(miss), friction)))
+        self._plan = ShoveDecision(time=self.world.time, block_position=seen, block_speed=speed, target=target,
+                                   direction=1 if miss > 0 else -1, release_speed=release, friction_belief=friction)
         self.decisions.append(self._plan)
 
-    def _block_has_settled(self):
-        """Whether the block's speed reading has stayed below STILL_SPEED for STILL_TIME."""
-        if abs(self.world.velocity) >= STILL_SPEED:
-            self._still_since = None
+    def _block_has_settled(self, position, speed):
+        """Whether the speed reading has stayed under the still threshold for STILL_TIME; meanwhile, add up the
+        position readings so the decision can use their average."""
+        if abs(speed) >= self.still_speed:
+            self._still_since, self._still_sum, self._still_count = None, 0.0, 0
             return False
         if self._still_since is None:
             self._still_since = self.world.time
+        self._still_sum += position
+        self._still_count += 1
         return self.world.time - self._still_since >= STILL_TIME - 1e-9
 
 
@@ -119,3 +140,43 @@ class OracleShover(ShoveController):
     def belief(self):
         self.friction_belief = self.world.friction  # the cheat
         return self.friction_belief
+
+
+class AdaptiveShover(ShoveController):
+    """Learns the friction from its own free slides, and plans with what it has learned.
+
+    During a free slide only friction acts, so the block slows at exactly friction x g, whatever its mass. From
+    FREE_SLIDE_MARGIN after braking starts, while the block's speed reading is clearly above zero, every `window`
+    steps (50 ms) give a reading: the speed change over the stretch, divided by its duration and by g. Only the two
+    speed readings at the stretch's ends carry noise, so a longer stretch divides that noise by a longer time
+    (as in stage F). The readings feed a FrictionEstimator, which starts from the nominal friction.
+    """
+
+    def __init__(self, world, forgetting=FRICTION_FORGETTING, window=WINDOW, **settings):
+        super().__init__(world, friction_belief=NOMINAL_FRICTION, **settings)
+        self.estimator = FrictionEstimator(NOMINAL_FRICTION, forgetting)
+        self.window = window
+        # Learn only while the speed reading is well clear of zero: near the stop, a stretch kept only because its
+        # last noisy reading happened to be high would read the friction too low.
+        self.learning_speed = max(SLIDING_SPEED, 6 * self.sensor.speed_noise)
+        self.readings = []   # (time, friction reading) for every stretch learned from, for checking and plotting
+        self._stretch = []   # speed readings so far in the current stretch
+
+    def belief(self):
+        self.friction_belief = self.estimator.friction
+        return self.friction_belief
+
+    def _learn(self, speed):
+        shove = self.motion.trajectory
+        free = (isinstance(shove, Shove) and self.motion.elapsed >= shove.release_time + FREE_SLIDE_MARGIN
+                and speed * self._plan.direction > self.learning_speed)
+        if not free:
+            self._stretch = []
+            return
+        self._stretch.append(speed)
+        if len(self._stretch) == self.window + 1:
+            slowing = -(self._stretch[-1] - self._stretch[0]) * self._plan.direction / (self.window * self.world.timestep)
+            reading = slowing / GRAVITY
+            self.estimator.learn(reading)
+            self.readings.append((self.world.time, reading))
+            self._stretch = [self._stretch[-1]]  # the next stretch starts where this one ended

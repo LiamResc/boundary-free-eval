@@ -54,7 +54,7 @@ def run(world, viewer=None):
             touched |= any("block" in (world.model.geom(c.geom1).name, world.model.geom(c.geom2).name)
                            for c in world.data.contact[:world.data.ncon])
             if viewer is not None:
-                draw_reference(viewer, motion.trajectory.reference(world.time - motion._started)[0])
+                draw_reference(viewer, motion.trajectory.reference(motion.elapsed)[0])
                 viewer.sync()
                 pace()
         end_error = np.linalg.norm(world.tip_position - ready_point(world.position, direction))

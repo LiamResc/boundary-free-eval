@@ -64,3 +64,43 @@ class FrictionMassEstimator:
     @property
     def friction(self):
         return float(np.clip(self.estimate[1] / self.mass, *FRICTION_RANGE))
+
+
+# ---- 4. For the arm world: friction alone, read from free slides ------------------
+
+FRICTION_FORGETTING = 0.9               # per reading (a 50 ms stretch of free sliding, about 2.5 per shove): memory ~10
+FRICTION_ESTIMATE_RANGE = (0.05, 2.0)   # beliefs handed to the controller stay inside this
+
+
+class FrictionEstimator:
+    """Recursive least squares on one unknown, the friction coefficient, read directly from free slides.
+
+    During a free slide only friction acts, so the block slows at friction x g whatever its mass, and each stretch of
+    the slide gives a reading of the friction: deceleration / g. With one unknown measured directly, recursive least
+    squares is a running average that forgets: the estimate moves a share (the gain) of the way to each new reading;
+    the share is large while it is unsure and shrinks as readings pile up, and forgetting stops it shrinking to
+    nothing, so older readings fade (the constant step size of Sutton & Barto, section 2.5).
+    """
+
+    def __init__(self, friction_guess, forgetting=FRICTION_FORGETTING, start_uncertainty=START_UNCERTAINTY):
+        self._estimate = friction_guess
+        self.start_uncertainty = start_uncertainty
+        self.uncertainty = start_uncertainty
+        self.forgetting = forgetting
+        self.points_learned = 0
+
+    def become_unsure(self):
+        """Go back to being as unsure as at the start, keeping the current estimate. The next reading then moves the
+        estimate nearly all the way to itself."""
+        self.uncertainty = self.start_uncertainty
+
+    def learn(self, reading):
+        """Move the estimate towards one friction reading."""
+        gain = self.uncertainty / (self.forgetting + self.uncertainty)  # further when more unsure
+        self._estimate += gain * (reading - self._estimate)
+        self.uncertainty = (1 - gain) * self.uncertainty / self.forgetting  # surer, then a little less sure again
+        self.points_learned += 1
+
+    @property
+    def friction(self):
+        return float(np.clip(self._estimate, *FRICTION_ESTIMATE_RANGE))

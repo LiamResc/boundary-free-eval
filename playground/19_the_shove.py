@@ -71,7 +71,7 @@ def run(world, viewer=None):
                 ball_speed = np.dot(world.tip_position - before, TRACK_AXIS) / world.timestep * DIRECTION
                 log.append((world.time, ball_speed, world.velocity * DIRECTION, world.position,
                             world.pusher_touches_block, world.joint_velocities,
-                            np.dot(motion.trajectory.reference(world.time - motion._started)[1], TRACK_AXIS)
+                            np.dot(motion.trajectory.reference(motion.elapsed)[1], TRACK_AXIS)
                             * DIRECTION))
             if viewer is not None:
                 viewer.sync()

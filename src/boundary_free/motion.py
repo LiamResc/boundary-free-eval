@@ -152,6 +152,11 @@ class PusherMotion:
         self.trajectory, self._started = trajectory, self.world.time
 
     @property
+    def elapsed(self):
+        """Seconds since it started following the current trajectory."""
+        return self.world.time - self._started
+
+    @property
     def done(self):
         """Whether the reference has reached the end of the trajectory (the ball may still be settling)."""
         return self.trajectory is None or self.world.time - self._started >= self.trajectory.duration

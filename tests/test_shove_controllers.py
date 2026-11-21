@@ -4,8 +4,8 @@ import pytest
 
 from boundary_free.arm_world import ArmWorld
 from boundary_free.motion import block_travel
-from boundary_free.shove_controllers import (STILL_SPEED, TOLERANCE, TOP_SPEED, OracleShover, ShoveController,
-                                             release_speed, static_shover)
+from boundary_free.shove_controllers import (TOLERANCE, TOP_SPEED, OracleShover, ShoveController, release_speed,
+                                             static_shover)
 
 
 def run(controller, target, seconds):
@@ -70,7 +70,7 @@ def test_it_decides_only_when_the_block_is_still_even_if_the_target_moves_mid_sh
     controller = OracleShover(ArmWorld(friction=0.45))
     run(controller, target=lambda t: 0.2 if t < 2.4 else -0.1, seconds=9.0)  # the target jumps during the first shove
     assert len(controller.decisions) >= 2
-    assert all(abs(d.block_speed) < STILL_SPEED for d in controller.decisions)
+    assert all(abs(d.block_speed) < controller.still_speed for d in controller.decisions)
     assert abs(controller.world.position - (-0.1)) <= TOLERANCE
 
 
