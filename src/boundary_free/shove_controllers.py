@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from boundary_free.block_world import GRAVITY
 from boundary_free.controllers import NOMINAL_FRICTION, SLIDING_SPEED, WINDOW, still_speed_for
+from boundary_free.detection import Cusum
 from boundary_free.estimator import FRICTION_FORGETTING, FrictionEstimator
 from boundary_free.motion import A_PUSH, STANDOFF, PusherMotion, Shove, trajectory_to_ready
 from boundary_free.sensing import BlockSensor
@@ -30,11 +31,19 @@ TOP_SPEED = 1.0     # the fastest release, m/s; a longer move takes more than on
 MIN_SPEED = 1.05 * math.sqrt(2 * A_PUSH * STANDOFF)
 STILL_TIME = 0.1    # the block counts as still once its speed reading has stayed under the still threshold this long
 FREE_SLIDE_MARGIN = 0.02  # seconds after braking starts before a slide counts as free (the block has left the ball)
+TRIGGERS = ("forgetting only", "told", "self-detected")  # what makes the adaptive controller become unsure
+READING_NOISE_FLOOR = 0.005  # the smallest reading noise CUSUM assumes, so a noise-free sensor does not alarm at trivia
 
 
 def release_speed(distance, friction):
     """The release speed that moves the block `distance` metres with this friction: block_travel solved for v."""
     return math.sqrt(2 * (distance + STANDOFF) / (1 / A_PUSH + 1 / (friction * GRAVITY)))
+
+
+def reading_noise(speed_noise, window, timestep):
+    """How far one friction reading is typically off, from the speed sensor's specified noise: the two noisy speed
+    readings at a stretch's ends differ by about sqrt(2) x noise, divided by the stretch's duration and by g."""
+    return max(READING_NOISE_FLOOR, math.sqrt(2) * speed_noise / (GRAVITY * window * timestep))
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,10 @@ class ShoveController:
     def belief(self):
         """The friction estimate to plan with. Static keeps its own; the oracle and adaptive override this."""
         return self.friction_belief
+
+    def told_of_change(self):
+        """The benchmark announces that something just changed (only in the told condition). Static and the oracle
+        have no use for it."""
 
     def update(self, target):
         """Read the sensor, learn (adaptive only), decide or carry on with the current shove, then steer the arm."""
@@ -150,21 +163,43 @@ class AdaptiveShover(ShoveController):
     steps (50 ms) give a reading: the speed change over the stretch, divided by its duration and by g. Only the two
     speed readings at the stretch's ends carry noise, so a longer stretch divides that noise by a longer time
     (as in stage F). The readings feed a FrictionEstimator, which starts from the nominal friction.
+
+    One response to a change, three triggers. The response is to become unsure, so the next readings replace the old
+    estimate. What triggers it:
+      - "forgetting only": nothing; old readings just fade;
+      - "told": the benchmark's announcement of each change (told_of_change);
+      - "self-detected": its own CUSUM on each reading's prediction error (the reading minus the current estimate,
+        before learning from it), in units of the reading noise. On an alarm it becomes unsure first and then learns
+        the reading, so the first evidence of the change counts fully.
     """
 
-    def __init__(self, world, forgetting=FRICTION_FORGETTING, window=WINDOW, **settings):
+    def __init__(self, world, trigger="forgetting only", forgetting=FRICTION_FORGETTING, window=WINDOW,
+                 detector=None, **settings):
         super().__init__(world, friction_belief=NOMINAL_FRICTION, **settings)
+        if trigger not in TRIGGERS:
+            raise ValueError(f"trigger must be one of {TRIGGERS}")
+        self.trigger = trigger
         self.estimator = FrictionEstimator(NOMINAL_FRICTION, forgetting)
         self.window = window
-        # Learn only while the speed reading is well clear of zero: near the stop, a stretch kept only because its
-        # last noisy reading happened to be high would read the friction too low.
-        self.learning_speed = max(SLIDING_SPEED, 6 * self.sensor.speed_noise)
+        # Learn only while the speed reading says the block is clearly sliding: above the still threshold, and at
+        # least 1 cm/s.
+        self.learning_speed = max(SLIDING_SPEED, self.still_speed)
+        self.detector = (detector or Cusum()) if trigger == "self-detected" else None
+        self.reading_noise = reading_noise(self.sensor.speed_noise, window, world.timestep)
         self.readings = []   # (time, friction reading) for every stretch learned from, for checking and plotting
+        self.resets = []     # (time, "told" or "alarm") for every time it became unsure
         self._stretch = []   # speed readings so far in the current stretch
 
     def belief(self):
         self.friction_belief = self.estimator.friction
         return self.friction_belief
+
+    def told_of_change(self):
+        """Only the told version listens. A stretch half-collected across the change mixes before and after, so drop
+        it."""
+        if self.trigger == "told":
+            self._become_unsure("told")
+            self._stretch = []
 
     def _learn(self, speed):
         shove = self.motion.trajectory
@@ -176,7 +211,19 @@ class AdaptiveShover(ShoveController):
         self._stretch.append(speed)
         if len(self._stretch) == self.window + 1:
             slowing = -(self._stretch[-1] - self._stretch[0]) * self._plan.direction / (self.window * self.world.timestep)
-            reading = slowing / GRAVITY
-            self.estimator.learn(reading)
-            self.readings.append((self.world.time, reading))
+            self._use_reading(slowing / GRAVITY)
             self._stretch = [self._stretch[-1]]  # the next stretch starts where this one ended
+
+    def _use_reading(self, reading):
+        """Check one friction reading for a change (self-detected only), then learn from it."""
+        if self.detector is not None:
+            error = (reading - self.estimator.friction) / self.reading_noise  # before learning from it
+            if self.detector.check(error):
+                self._become_unsure("alarm")                                # then learn, below
+        self.estimator.learn(reading)
+        self.readings.append((self.world.time, reading))
+
+    def _become_unsure(self, cause):
+        """The one response all three versions share."""
+        self.estimator.become_unsure()
+        self.resets.append((self.world.time, cause))
