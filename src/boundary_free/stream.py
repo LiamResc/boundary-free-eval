@@ -53,6 +53,7 @@ class Schedule:
     mass_changes: tuple = ()
     speed_noise: float = 0.0   # how far off a speed reading typically is, in m/s (the noise's standard deviation)
     noise_seed: int = 0        # which noise: the same seed always gives the same noise
+    position_noise: float = 0.0  # arm world only: how far off a position reading typically is, in metres
 
     def target_index(self, time):
         """Which target is current at a given time: 0 for the first (the last one stays once the list runs out)."""

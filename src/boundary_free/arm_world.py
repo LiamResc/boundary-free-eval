@@ -18,7 +18,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from boundary_free.block_world import GRAVITY
+from boundary_free.block_world import GRAVITY, SAVED_STATE, Snapshot
 
 ARM_SCENE = Path(__file__).resolve().parents[2] / "models" / "franka_fr3" / "scene.xml"
 
@@ -212,7 +212,32 @@ class ArmWorld:
         """Where the centre of the pusher's ball is, in metres (x, y, z), worked out from the joint angles."""
         return self.data.site_xpos[self._tip].copy()
 
-    # ---- 4. For checking and drawing only (controllers must not use this) ----
+    # ---- 4. Save, restore and branch (as in the block world) ------------------
+
+    def snapshot(self):
+        """Save this moment: MuJoCo's state (the arm's joints and the block, their speeds, the motor commands and
+        bookkeeping) plus the block's hidden knobs, which live in the model, not the data."""
+        state = np.empty(mujoco.mj_stateSize(self.model, SAVED_STATE))
+        mujoco.mj_getState(self.model, self.data, state, SAVED_STATE)
+        return Snapshot(state=state, friction=self._friction, mass=self.mass)
+
+    def restore(self, snapshot):
+        """Go back to a saved moment and carry on exactly from there."""
+        self.set_friction(snapshot.friction)
+        if snapshot.mass != self.mass:
+            self.set_mass(snapshot.mass)
+        mujoco.mj_setState(self.model, self.data, snapshot.state, SAVED_STATE)
+        mujoco.mj_kinematics(self.model, self.data)  # so tip_position and Jacobians describe the restored arm
+        mujoco.mj_comPos(self.model, self.data)
+
+    def branch(self):
+        """A brand-new arm world at this same moment, for a "what if" run. It has its own model and data, so nothing
+        done in the branch can leak back into this world."""
+        twin = ArmWorld(friction=self._friction, mass=self.mass)
+        twin.restore(self.snapshot())
+        return twin
+
+    # ---- 5. For checking and drawing only (controllers must not use this) ----
 
     @property
     def friction_force(self):

@@ -82,6 +82,15 @@ class ShoveController:
         """The benchmark announces that something just changed (only in the told condition). Static and the oracle
         have no use for it."""
 
+    def take_over_from(self, other):
+        """Carry on from where another controller is, as the deviation does on a branch: inherit what it is in the
+        middle of (its phase, its plan, the ball's trajectory and the still spell so far) and make every decision
+        from now on with this controller's own friction estimate. Returns self."""
+        self.phase, self._plan = other.phase, other._plan
+        self._still_since, self._still_sum, self._still_count = other._still_since, other._still_sum, other._still_count
+        self.motion.trajectory, self.motion._started = other.motion.trajectory, other.motion._started
+        return self
+
     def update(self, target):
         """Read the sensor, learn (adaptive only), decide or carry on with the current shove, then steer the arm."""
         world, motion = self.world, self.motion
